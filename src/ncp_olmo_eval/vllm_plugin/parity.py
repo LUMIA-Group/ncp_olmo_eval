@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import torch
@@ -370,90 +369,13 @@ def _stack_stage_rows(
 
 
 def run_reference(args: argparse.Namespace) -> None:
-    _require(
-        args,
-        "checkpoint_root",
-        "tokenizer_model",
-        "train_wandb_config",
+    del args
+    raise RuntimeError(
+        "reference mode requires the unpublished native Megatron training stack and "
+        "is not distributed by ncp-olmo-eval. Generate inputs.json/reference.pt in "
+        "the native training repository, then use this package's vllm and compare "
+        "modes."
     )
-    from ncp_olmo_eval import benchmark
-    from ncp_olmo_eval.common import forward_last_token_logits
-
-    args.output_dir.mkdir(parents=True, exist_ok=False)
-    lm_eval_model = benchmark.load_model(
-        SimpleNamespace(
-            checkpoint_root=args.checkpoint_root,
-            ckpt_step=args.ckpt_step,
-            tokenizer_model=args.tokenizer_model,
-            train_wandb_config=args.train_wandb_config,
-            flash_decode=False,
-            cuda_graph=False,
-            batch_size=1,
-            seq_length=args.max_model_len,
-            max_new_tokens=args.max_new_tokens,
-        )
-    )
-    eval_model = benchmark.EvalModelAdapter(lm_eval_model)
-    capture = _ReferenceStageCapture(benchmark.unwrap_model(eval_model))
-    phase_cases = _trace_cases(args, eval_model.tokenizer)
-    if max(case["prompt_length"] for case in phase_cases) + args.max_new_tokens > (
-        args.max_model_len
-    ):
-        raise ValueError(
-            "trace prompt plus continuation exceeds max model length: "
-            f"{max(case['prompt_length'] for case in phase_cases)} + "
-            f"{args.max_new_tokens} > {args.max_model_len}"
-        )
-    phase_logits = []
-    phase_stages = []
-    greedy_stages = []
-    try:
-        for case in phase_cases:
-            token_ids = case["token_ids"]
-            capture.reset()
-            phase_logits.append(
-                forward_last_token_logits(eval_model, [token_ids])[0].float().cpu()
-            )
-            phase_stages.append(capture.consume())
-
-        greedy_prompt_ids = list(phase_cases[-1]["token_ids"])
-        greedy_ids = list(greedy_prompt_ids)
-        greedy_tokens = []
-        greedy_logits = []
-        for _ in range(args.max_new_tokens):
-            capture.reset()
-            logits = forward_last_token_logits(eval_model, [greedy_ids])[0].float()
-            greedy_stages.append(capture.consume())
-            next_token = int(torch.argmax(logits).item())
-            greedy_logits.append(logits.cpu())
-            greedy_tokens.append(next_token)
-            greedy_ids.append(next_token)
-    finally:
-        capture.close()
-
-    inputs = {
-        "phase_cases": phase_cases,
-        "greedy_prompt_ids": greedy_prompt_ids,
-        "max_new_tokens": args.max_new_tokens,
-        "max_model_len": args.max_model_len,
-        "prompt_jsonl": args.prompt_jsonl,
-        "prompt_indices": args.prompt_indices,
-    }
-    (args.output_dir / "inputs.json").write_text(
-        json.dumps(inputs, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    torch.save(
-        {
-            "phase_logits": torch.stack(phase_logits),
-            "greedy_logits": torch.stack(greedy_logits),
-            "greedy_tokens": greedy_tokens,
-            "phase_stages": _stack_stage_rows(phase_stages),
-            "greedy_stages": _stack_stage_rows(greedy_stages),
-        },
-        args.output_dir / "reference.pt",
-    )
-    (args.output_dir / "_SUCCESS").touch()
 
 
 def run_vllm(args: argparse.Namespace) -> None:

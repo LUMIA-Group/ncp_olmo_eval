@@ -20,8 +20,8 @@ adapter.
 | HELMET | pinned official profile, 8K/16K/32K/64K, seed 42, batch 4 | 1 x 8 GPU | family/length scores |
 
 Stock OLMo uses vLLM's built-in model implementation. NCP OLMo is registered
-through the installed `vllm.general_plugins` entry point. NCP model use remains
-explicitly parity-gated.
+through the installed `vllm.general_plugins` entry point and remains behind an
+explicit experimental opt-in gate.
 
 ## Install
 
@@ -143,6 +143,8 @@ deployment and task status semantics are in [PORTABILITY.md](docs/PORTABILITY.md
   applicable, credentials injected at execution time. Secrets are rejected in
   serialized task environments.
 - Strict numerical parity with a native Megatron implementation is not claimed.
+  The optional parity helper can consume native reference artifacts, but the
+  private training stack needed to generate them is intentionally not bundled.
 
 ## License
 

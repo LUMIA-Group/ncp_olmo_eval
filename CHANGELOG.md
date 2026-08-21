@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0a3
+
+- Restored the CUDA device-layout helper required when Core88 starts its GPU
+  worker pool from an installed package.
+- Made the unpublished native-Megatron reference side of the optional parity
+  harness fail early with an actionable boundary instead of importing modules
+  that are not part of the public distribution.
+- Added release-integrity tests for internal package imports and worker device
+  mapping so source extraction omissions fail in CPU-only CI.
+- Kept the GSM8K, Core88, RULER, and HELMET vLLM protocol contracts unchanged.
+
 ## 0.1.0a2
 
 - Replaced the site-specific submission layer with portable JSON task specs,
