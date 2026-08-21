@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install host-only dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check src tests scripts
+      - name: Compile
+        run: python -m compileall -q src
+      - name: Test contracts
+        run: pytest -q
+      - name: Check portable adapters
+        run: |
+          find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          python -m py_compile scripts/*.py
+      - name: Build distributions
+        run: python -m build

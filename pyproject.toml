@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ncp-olmo-eval"
+version = "0.1.0a2"
+description = "Reproducible vLLM evaluation for OLMo and NCP OLMo"
+readme = "README.md"
+requires-python = ">=3.12"
+license-files = ["LICENSE"]
+authors = [
+  {name = "NCP OLMo contributors"},
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: GPU :: NVIDIA CUDA",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy>=1.26,<3",
+  "safetensors>=0.4.5",
+  "huggingface-hub>=0.36,<2",
+  "transformers>=5.0,<6",
+]
+
+[project.urls]
+Repository = "https://github.com/LuckySJTU/ncp_olmo_eval"
+Issues = "https://github.com/LuckySJTU/ncp_olmo_eval/issues"
+
+[project.optional-dependencies]
+vllm = [
+  "torch==2.9.*",
+  "vllm==0.13.0",
+]
+dev = [
+  "build>=1.2",
+  "pytest>=8.3",
+  "ruff>=0.9",
+]
+helmet = [
+  "datasets>=3.0",
+  "nltk>=3.9",
+  "openai>=1.60",
+  "scikit-learn>=1.5",
+]
+
+[project.scripts]
+ncp-olmo-eval = "ncp_olmo_eval.evaluation_cli:main"
+ncp-olmo-eval-prepare = "ncp_olmo_eval.prepare_cli:main"
+ncp-olmo-eval-task = "ncp_olmo_eval.task_runner:main"
+ncp-olmo-eval-assets = "ncp_olmo_eval.assets:main"
+
+[project.entry-points."vllm.general_plugins"]
+ncp_olmo = "ncp_olmo_eval.vllm_plugin.plugin:register"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ncp_olmo_eval = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]

@@ -1,0 +1,12 @@
+{
+  "schema_version": "ncp-olmo-eval-assets-v1",
+  "assets": [
+    {
+      "name": "helmet-autoais",
+      "repo_id": "google/t5_xxl_true_nli_mixture",
+      "repo_type": "model",
+      "revision": "REPLACE_WITH_FULL_COMMIT_SHA",
+      "allow_patterns": ["*.json", "*.model", "*.safetensors", "*.txt"]
+    }
+  ]
+}

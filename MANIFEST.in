@@ -1,0 +1,6 @@
+include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md LICENSE
+recursive-include configs *.example *.example.json
+recursive-include docs *.md
+recursive-include docker *.Dockerfile
+recursive-include scripts *.py *.sh
+recursive-include tests *.py
