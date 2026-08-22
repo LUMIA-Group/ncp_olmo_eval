@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Reproducible vLLM evaluation for OLMo and NCP OLMo"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,6 +34,10 @@ Issues = "https://github.com/LuckySJTU/ncp_olmo_eval/issues"
 vllm = [
   "torch==2.9.*",
   "vllm==0.13.0",
+  "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
+]
+gsm8k = [
+  "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
 ]
 dev = [
   "build>=1.2",

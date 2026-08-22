@@ -15,6 +15,7 @@ from ncp_olmo_eval.core_native_answer_eval import (
     OFFICIAL_OLMO_EVAL_COMMIT,
     score_gsm_answer,
 )
+from ncp_olmo_eval.lm_eval_runtime import runtime_identity, task_manager_class
 
 STANDARD_TASK_GROUP = "olmo_eval_paper_math_gsm_8shot"
 STANDARD_TASK_NAME = "olmo_eval_paper_gsm8k_main"
@@ -202,8 +203,7 @@ def _load_standard_input(path: Path) -> dict[str, Any]:
 
 
 def _load_gsm8k(task_name: str, task_include_path: str) -> tuple[Any, list[dict[str, Any]]]:
-    from lm_eval.tasks import TaskManager
-
+    TaskManager = task_manager_class()
     loaded = TaskManager(include_path=task_include_path, include_defaults=False).load(task_name)
     task = loaded["tasks"][task_name]
     eval_docs = task.eval_docs
@@ -266,6 +266,7 @@ def _resolve_protocol(
         )
     task, docs = _load_gsm8k(args.task_name, task_include_path)
     task_contract = _validate_standard_task(task)
+    task_contract["lm_eval"] = runtime_identity()
     dataset_test_path = _task_test_file(task)
     if args.dataset_test_file and Path(args.dataset_test_file) != dataset_test_path:
         raise ValueError(

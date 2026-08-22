@@ -19,6 +19,7 @@ import torch
 from . import benchmark
 from .core_native_answer_eval import OFFICIAL_OLMO_EVAL_COMMIT, score_gsm_answer
 from .inference import ConceptLMInferencer, SamplingParams
+from .lm_eval_runtime import runtime_identity, task_manager_class
 from .lmdeploy_inference import (
     LMDEPLOY_BACKEND,
     LMDeployInferencer,
@@ -251,8 +252,7 @@ def _load_gsm8k(
     task_name: str,
     task_include_path: str,
 ) -> tuple[Any, list[dict[str, Any]]]:
-    from lm_eval.tasks import TaskManager
-
+    TaskManager = task_manager_class()
     loaded = TaskManager(
         include_path=task_include_path,
         include_defaults=False,
@@ -530,6 +530,7 @@ def main() -> None:
     task_load_started = time.perf_counter()
     task, docs = _load_gsm8k(args.task_name, task_include_path)
     task_contract = _validate_standard_task(task)
+    task_contract["lm_eval"] = runtime_identity()
     if args.max_new_tokens != task_contract["generation_kwargs"]["max_gen_toks"]:
         raise ValueError(
             "--max-new-tokens must match the standard task YAML: "

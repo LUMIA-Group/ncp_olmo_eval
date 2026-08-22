@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0a4
+
+- Pin the official `lm-evaluation-harness` commit required by GSM8K/Core88.
+- Include that runtime in the `vllm` and CPU-only `gsm8k` installation extras.
+- Fail early on a missing or version-drifted harness and record its immutable
+  identity in prepared GSM8K manifests.
+
 ## 0.1.0a3
 
 - Restored the CUDA device-layout helper required when Core88 starts its GPU

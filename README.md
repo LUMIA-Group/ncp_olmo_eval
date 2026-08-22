@@ -34,6 +34,11 @@ pip install -e '.[vllm,helmet,dev]'
 ```
 
 For protocol/unit tests without CUDA, `pip install -e '.[dev]'` is sufficient.
+For CPU-only GSM8K protocol preparation, install `.[gsm8k,dev]`. The `vllm`
+extra already includes the same dependency. Both extras pin
+`lm-evaluation-harness` to the exact official commit used by the published
+GSM8K/Core88 task-loading contract; a different harness version is rejected
+before task data is read.
 The NCP vLLM plugin must be installed, not only placed on `PYTHONPATH`.
 
 ## Reproducible assets and environment
