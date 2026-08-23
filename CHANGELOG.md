@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0a5
+
+- Remove the unpublished LMDeploy verification flag from portable vLLM
+  Core88, RULER, and HELMET commands. The public package intentionally omits
+  LMDeploy, so passing its internal-only flag made the public parsers reject
+  otherwise valid jobs before model loading.
+- Add release-integrity coverage that rejects future command-generation leaks
+  of the removed flag; release validation also parses the generated Core88
+  worker command in the pinned GPU runtime.
+
 ## 0.1.0a4
 
 - Pin the official `lm-evaluation-harness` commit required by GSM8K/Core88.

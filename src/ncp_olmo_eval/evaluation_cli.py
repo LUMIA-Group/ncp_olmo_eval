@@ -892,7 +892,6 @@ def _core_commands(
             "--vllm-flash-attn-version", "3",
             "--vllm-hlm-attention-impl", "legacy_mixed",
             "--allow-unverified-native-vllm",
-            "--no-allow-unverified-lmdeploy",
             "--no-hf-align-dcp-runtime-config",
             "--verify-data-sha256",
             "--resume",

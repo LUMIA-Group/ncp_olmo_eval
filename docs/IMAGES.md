@@ -8,10 +8,10 @@ Build from a clean source revision:
 docker build -f docker/runtime.Dockerfile \
   --build-arg BASE_IMAGE='nvidia/cuda@sha256:REPLACE_WITH_PINNED_DIGEST' \
   --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
-  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a3 .
-docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a3
+  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a5 .
+docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a5
 docker inspect --format '{{index .RepoDigests 0}}' \
-  ghcr.io/ORG/ncp-olmo-eval:0.1.0a3
+  ghcr.io/ORG/ncp-olmo-eval:0.1.0a5
 ```
 
 `SOURCE_REVISION` must be the full 40-character source revision used for the

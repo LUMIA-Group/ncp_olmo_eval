@@ -56,6 +56,16 @@ def test_every_internal_relative_import_is_published() -> None:
     assert not missing, "missing internal modules:\n" + "\n".join(sorted(missing))
 
 
+def test_published_commands_do_not_reference_internal_lmdeploy_flags() -> None:
+    package_root = Path(__file__).resolve().parents[2] / "src" / "ncp_olmo_eval"
+    leaked = [
+        str(path.relative_to(package_root))
+        for path in package_root.rglob("*.py")
+        if "--no-allow-unverified-lmdeploy" in path.read_text(encoding="utf-8")
+    ]
+    assert not leaked, "internal LMDeploy flag leaked into published commands: " + ", ".join(leaked)
+
+
 def test_device_layout_maps_independent_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

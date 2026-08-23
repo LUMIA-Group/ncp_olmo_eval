@@ -111,6 +111,9 @@ def test_dry_run_builds_five_portable_core88_tasks(
     ]
     assert all(task["status"] == "DryRun" for task in result["jobs"])
     assert all(task["command"]["argv"][0] == evaluation_cli.PYTHON_BIN for task in result["jobs"])
+    for task in result["jobs"][:4]:
+        argv = task["command"]["argv"]
+        assert "--no-allow-unverified-lmdeploy" not in argv
     assert not (evaluation_root / registration["registration_name"] / "core88").exists()
 
 

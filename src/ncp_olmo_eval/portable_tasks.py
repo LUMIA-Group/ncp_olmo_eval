@@ -284,7 +284,6 @@ def run_long_context(args: argparse.Namespace) -> None:
         "--vllm-tensor-parallel-size",
         args.tensor_parallel_size,
         "--allow-unverified-native-vllm",
-        "--no-allow-unverified-lmdeploy",
         "--no-hf-compile-routes",
         "--no-hf-align-dcp-runtime-config",
         "--no-allow-context-extension",
