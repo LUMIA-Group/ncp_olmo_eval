@@ -9,7 +9,7 @@ import pytest
 
 from ncp_olmo_eval import assets
 from ncp_olmo_eval.source_identity import package_tree_sha256, source_state
-from ncp_olmo_eval.task_runner import run_task
+from ncp_olmo_eval.task_runner import _resolved_argv, run_task
 from ncp_olmo_eval.task_spec import Resources, TaskSpec, read_status, write_task
 
 
@@ -113,3 +113,15 @@ def test_installed_source_identity_is_path_independent(
     assert state["source_kind"] == "installed-package"
     assert state["repo_commit"] == revision
     assert state["source_tree_sha256"] == package_tree_sha256()
+
+
+def test_task_python_can_be_selected_by_container_executor() -> None:
+    assert _resolved_argv(
+        ("/shared/vllm/bin/python", "-m", "ncp_olmo_eval.core_native_code_eval"),
+        {"NCP_OLMO_TASK_PYTHON": sys.executable},
+    ) == [sys.executable, "-m", "ncp_olmo_eval.core_native_code_eval"]
+
+
+def test_task_python_override_rejects_non_python_command() -> None:
+    with pytest.raises(RuntimeError, match="only replace a Python"):
+        _resolved_argv(("bash", "script.sh"), {"NCP_OLMO_TASK_PYTHON": sys.executable})

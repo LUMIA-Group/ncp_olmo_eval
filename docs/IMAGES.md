@@ -6,13 +6,19 @@ Build from a clean source revision:
 
 ```bash
 docker build -f docker/runtime.Dockerfile \
-  --build-arg BASE_IMAGE='nvidia/cuda@sha256:REPLACE_WITH_PINNED_DIGEST' \
+  --build-arg BASE_IMAGE='vllm/vllm-openai@sha256:REPLACE_WITH_PINNED_DIGEST' \
   --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
-  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a6 .
-docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a6
+  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a7 .
+docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a7
 docker inspect --format '{{index .RepoDigests 0}}' \
-  ghcr.io/ORG/ncp-olmo-eval:0.1.0a6
+  ghcr.io/ORG/ncp-olmo-eval:0.1.0a7
 ```
+
+The base image must expose Python 3.12 or newer as `python3` (override
+`PYTHON_BIN` only when the pinned base uses another executable). The default
+build installs `.[vllm,helmet,scoring]` and runs the Minerva/MATH runtime smoke
+before producing an image. CI uses the same Dockerfile with the smaller
+`scoring` dependency slice so the scorer contract is exercised without a GPU.
 
 `SOURCE_REVISION` must be the full 40-character source revision used for the
 build. Workers also record and verify a path-independent SHA-256 of the

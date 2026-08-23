@@ -5,15 +5,20 @@ FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_REVISION=unknown
+ARG PYTHON_BIN=python3
+ARG INSTALL_EXTRAS=vllm,helmet,scoring
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates git python3.12 python3.12-dev python3-pip python3-venv \
+      ca-certificates git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/ncp-olmo-eval
 COPY . /opt/ncp-olmo-eval
-RUN python3.12 -m pip install --no-cache-dir --break-system-packages '.[vllm,helmet]'
+RUN "${PYTHON_BIN}" -c \
+      'import sys; assert sys.version_info >= (3, 12), sys.version' \
+ && "${PYTHON_BIN}" -m pip install --no-cache-dir ".[$INSTALL_EXTRAS]" \
+ && "${PYTHON_BIN}" -m ncp_olmo_eval.runtime_smoke math
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

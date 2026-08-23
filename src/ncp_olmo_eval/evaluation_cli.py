@@ -1729,6 +1729,7 @@ def _score_command(
             argv.append("--allow-experimental-scorers")
         if int(group["index"]) == 1:
             env["OLMO_EVAL_COMMIT"] = OLMO_EVAL_COMMIT
+            env["OLMO_EVAL_ROOT"] = str(OLMO_EVAL_ROOT)
             env["PYTHONPATH"] = f"{OLMO_EVAL_ROOT / 'src'}:{os.environ.get('PYTHONPATH', '')}"
         return CommandSpec(
             tuple(argv), env, Resources(gpus=0, cpus=8, memory_gib=32), output_dir, image

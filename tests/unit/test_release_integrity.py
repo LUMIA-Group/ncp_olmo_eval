@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -66,6 +67,34 @@ def test_published_commands_do_not_reference_internal_lmdeploy_flags() -> None:
         if "--no-allow-unverified-lmdeploy" in path.read_text(encoding="utf-8")
     ]
     assert not leaked, "internal LMDeploy flag leaked into published commands: " + ", ".join(leaked)
+
+
+def test_release_pins_official_math_runtime_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    optional = project["project"]["optional-dependencies"]
+    expected = {"sympy==1.14.0", "antlr4-python3-runtime==4.11"}
+    assert expected <= set(optional["scoring"])
+    assert expected <= set(optional["vllm"])
+    assert expected <= set(optional["gsm8k"])
+    dockerfile = (root / "docker/runtime.Dockerfile").read_text(encoding="utf-8")
+    assert "INSTALL_EXTRAS=vllm,helmet,scoring" in dockerfile
+    assert "ncp_olmo_eval.runtime_smoke math" in dockerfile
+
+
+def test_release_pins_the_validated_vllm_dependency_pair() -> None:
+    root = Path(__file__).resolve().parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = set(project["project"]["dependencies"])
+    assert "transformers==4.57.6" in dependencies
+    assert "huggingface-hub==0.36.2" in dependencies
+
+
+def test_bigcodebench_does_not_import_olmo_eval_task_registry() -> None:
+    root = Path(__file__).resolve().parents[2]
+    source = (root / "src/ncp_olmo_eval/core_native_code_eval.py").read_text(encoding="utf-8")
+    assert "from olmo_eval.evals.tasks" not in source
+    assert "importlib.util.find_spec" not in source
 
 
 def test_omitted_lmdeploy_validation_is_backend_gated() -> None:

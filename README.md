@@ -30,7 +30,7 @@ Python 3.12 and a CUDA-capable runtime are expected.
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[vllm,helmet,dev]'
+pip install -e '.[vllm,helmet,scoring,dev]'
 ```
 
 For protocol/unit tests without CUDA, `pip install -e '.[dev]'` is sufficient.
@@ -39,7 +39,13 @@ extra already includes the same dependency. Both extras pin
 `lm-evaluation-harness` to the exact official commit used by the published
 GSM8K/Core88 task-loading contract; a different harness version is rejected
 before task data is read.
+The release also pins the validated vLLM 0.13.0 dependency pair
+`transformers==4.57.6` and `huggingface-hub==0.36.2`; do not let a container
+base silently replace either version.
 The NCP vLLM plugin must be installed, not only placed on `PYTHONPATH`.
+The `scoring` extra pins the exact SymPy/ANTLR runtime used by the formal
+Minerva, MATH, and MATH-500 scorer; production runtime images install it by
+default and fail their build if its CPU-only smoke does not pass.
 
 ## Reproducible assets and environment
 

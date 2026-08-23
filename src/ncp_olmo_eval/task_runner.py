@@ -5,11 +5,32 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Sequence
 
 from .task_spec import read_status, read_task, write_status
+
+
+def _resolved_argv(argv: Sequence[str], env: dict[str, str]) -> list[str]:
+    resolved = list(argv)
+    replacement = env.get("NCP_OLMO_TASK_PYTHON", "").strip()
+    if not replacement:
+        return resolved
+    if not resolved:
+        raise RuntimeError("task argv is empty")
+    executable = Path(resolved[0]).name
+    if re.fullmatch(r"python(?:3(?:\.\d+)?)?", executable) is None:
+        raise RuntimeError(
+            "NCP_OLMO_TASK_PYTHON may only replace a Python task executable, "
+            f"got {resolved[0]!r}"
+        )
+    selected = Path(replacement)
+    if not selected.is_absolute() or not selected.is_file() or not os.access(selected, os.X_OK):
+        raise RuntimeError(f"NCP_OLMO_TASK_PYTHON is not an executable absolute path: {selected}")
+    resolved[0] = str(selected)
+    return resolved
 
 
 def run_task(spec_path: Path) -> dict[str, object]:
@@ -22,13 +43,18 @@ def run_task(spec_path: Path) -> dict[str, object]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env.update(spec.env)
+    argv = _resolved_argv(spec.argv, env)
     write_status(Path(spec.status_path), spec=spec, state="Running")
     try:
         with log_path.open("a", encoding="utf-8") as log:
-            log.write(f"task_id={spec.task_id}\nargv={json.dumps(spec.argv)}\n")
+            log.write(
+                f"task_id={spec.task_id}\n"
+                f"argv={json.dumps(spec.argv)}\n"
+                f"resolved_argv={json.dumps(argv)}\n"
+            )
             log.flush()
             result = subprocess.run(
-                list(spec.argv), cwd=spec.cwd, env=env, stdout=log, stderr=subprocess.STDOUT
+                argv, cwd=spec.cwd, env=env, stdout=log, stderr=subprocess.STDOUT
             )
     except BaseException as error:
         write_status(Path(spec.status_path), spec=spec, state="Failed", detail=repr(error))

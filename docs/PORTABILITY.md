@@ -21,6 +21,13 @@ runner writes every transition atomically. Cluster adapters must invoke:
 python -m ncp_olmo_eval.task_runner /absolute/path/to/task.json
 ```
 
+When one plan uses heterogeneous images, the executor may set
+`NCP_OLMO_TASK_PYTHON` to an executable absolute path inside the active image.
+The runner only applies this override when the task argv already names a
+Python executable; it rejects attempts to rewrite arbitrary commands. This is
+the supported boundary for scorer images whose Python lives under `/usr`,
+`/usr/local`, or a sealed task-specific prefix.
+
 They must not synthesize `Succeeded`; artifact validation is a separate gate.
 `status` reports both the task state and benchmark-specific completeness.
 

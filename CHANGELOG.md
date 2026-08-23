@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.0a7
+
+- Pin the mutually compatible and previously GPU-validated dependency pair
+  `transformers==4.57.6` and `huggingface-hub==0.36.2`; the old public
+  `transformers>=5` declaration conflicted with vLLM 0.13.0's `<5` bound.
+- Pin the release Math scorer runtime to `sympy==1.14.0` and
+  `antlr4-python3-runtime==4.11`, install it in the default runtime image, and
+  execute a real Minerva/MATH equivalence smoke during the Docker build.
+- Load BigCodeBench's two required helpers from SHA-verified files at the
+  pinned OLMo-Eval commit instead of importing its eager task registry. This
+  removes the accidental dependency on the deleted
+  `huggingface_hub.utils.silent_tqdm` API without weakening source fidelity.
+- Add Docker CI that builds the runtime scorer slice, runs the official Math
+  runtime smoke, and runs a BigCodeBench helper preflight against the pinned
+  upstream source.
+- Allow site executors to replace only a Python task's interpreter through the
+  explicit `NCP_OLMO_TASK_PYTHON` boundary, so heterogeneous sandbox images do
+  not inherit an unrelated inference virtualenv.
+
 ## 0.1.0a6
 
 - Gate LMDeploy argument validation on the selected backend in the Core88

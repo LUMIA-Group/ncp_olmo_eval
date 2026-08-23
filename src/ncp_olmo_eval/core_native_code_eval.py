@@ -38,12 +38,14 @@ VERIFIED_SCORER_TASKS = {79, 82, 83, 85}
 RESULT_SCHEMA_VERSION = "core-native-code-result-v1"
 SUMMARY_SCHEMA_VERSION = "core-native-code-sandbox-v2"
 OFFICIAL_OLMO_EVAL_COMMIT = "f8816eea36563f27b4a9dd2533d68d34f3c67d3f"
-OFFICIAL_OLMO_EVAL_SOURCE_SHA256 = {
+OFFICIAL_OLMO_EVAL_SOURCE = {
     "olmo_eval.evals.extract.sanitize": (
-        "ca2b52216ac8b6ef27af87d55b3d8c5b8a6a2b85b65b9e3b8227e176d2cf3039"
+        Path("src/olmo_eval/evals/extract/sanitize.py"),
+        "ca2b52216ac8b6ef27af87d55b3d8c5b8a6a2b85b65b9e3b8227e176d2cf3039",
     ),
     "olmo_eval.evals.tasks.bigcodebench": (
-        "4bc9a1c9bdb2f710cca49e5d254a9474c3d1614f36c27d8df100feae0d0be910"
+        Path("src/olmo_eval/evals/tasks/bigcodebench.py"),
+        "4bc9a1c9bdb2f710cca49e5d254a9474c3d1614f36c27d8df100feae0d0be910",
     ),
 }
 DS1000_PYTHON_VERSION = "3.10.13"
@@ -373,15 +375,39 @@ def _extract_deepseek_continuation(text: str) -> str:
     return candidates[0] if candidates else text
 
 
-def _verify_official_olmo_eval_source() -> dict[str, str]:
+def _official_olmo_eval_root() -> Path:
     if os.environ.get("OLMO_EVAL_COMMIT") != OFFICIAL_OLMO_EVAL_COMMIT:
         raise RuntimeError("BigCodeBench requires OLMO_EVAL_COMMIT=" f"{OFFICIAL_OLMO_EVAL_COMMIT}")
+    configured = os.environ.get("OLMO_EVAL_ROOT") or os.environ.get(
+        "NCP_OLMO_OLMO_EVAL_ROOT"
+    )
+    if not configured:
+        raise RuntimeError("BigCodeBench requires an explicit OLMO_EVAL_ROOT")
+    root = Path(configured).expanduser().resolve()
+    if not root.is_dir():
+        raise RuntimeError(f"official OLMo-Eval source root is unavailable: {root}")
+    return root
+
+
+def _official_olmo_eval_source_paths() -> dict[str, Path]:
+    root = _official_olmo_eval_root()
+    paths: dict[str, Path] = {}
+    for module_name, (relative_path, _expected_sha256) in OFFICIAL_OLMO_EVAL_SOURCE.items():
+        path = (root / relative_path).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as error:
+            raise RuntimeError(f"OLMo-Eval source escapes its sealed root: {path}") from error
+        if not path.is_file():
+            raise RuntimeError(f"official OLMo-Eval source is unavailable: {path}")
+        paths[module_name] = path
+    return paths
+
+
+def _verify_official_olmo_eval_source() -> dict[str, str]:
     observed: dict[str, str] = {}
-    for module_name, expected_sha256 in OFFICIAL_OLMO_EVAL_SOURCE_SHA256.items():
-        spec = importlib.util.find_spec(module_name)
-        if spec is None or not spec.origin:
-            raise RuntimeError(f"official OLMo-Eval module is unavailable: {module_name}")
-        path = Path(spec.origin).resolve()
+    for module_name, path in _official_olmo_eval_source_paths().items():
+        _relative_path, expected_sha256 = OFFICIAL_OLMO_EVAL_SOURCE[module_name]
         actual_sha256 = _file_sha256(path)
         if actual_sha256 != expected_sha256:
             raise RuntimeError(
@@ -390,6 +416,50 @@ def _verify_official_olmo_eval_source() -> dict[str, str]:
             )
         observed[module_name] = actual_sha256
     return observed
+
+
+def _load_official_bigcodebench_helpers() -> tuple[Any, Any]:
+    """Load only the two pinned helpers without importing OLMo-Eval's registry.
+
+    Importing ``olmo_eval.evals.tasks.bigcodebench`` first executes the parent
+    ``tasks`` package, which eagerly imports every registered evaluator and
+    therefore couples BigCodeBench to unrelated optional Hub APIs.  The two
+    required helpers are instead loaded from their already SHA-verified source
+    files.  The BigCodeBench helper is deliberately extracted as one AST
+    function so none of that module's registry decorators or imports execute.
+    """
+
+    _verify_official_olmo_eval_source()
+    paths = _official_olmo_eval_source_paths()
+    sanitize_path = paths["olmo_eval.evals.extract.sanitize"]
+    sanitize_spec = importlib.util.spec_from_file_location(
+        "_ncp_olmo_eval_pinned_sanitize", sanitize_path
+    )
+    if sanitize_spec is None or sanitize_spec.loader is None:
+        raise RuntimeError(f"cannot load pinned OLMo-Eval sanitizer: {sanitize_path}")
+    sanitize_module = importlib.util.module_from_spec(sanitize_spec)
+    sanitize_spec.loader.exec_module(sanitize_module)
+    sanitize_code = getattr(sanitize_module, "sanitize_code", None)
+    if not callable(sanitize_code):
+        raise RuntimeError("pinned OLMo-Eval sanitizer lacks sanitize_code")
+
+    bigcodebench_path = paths["olmo_eval.evals.tasks.bigcodebench"]
+    parsed = ast.parse(bigcodebench_path.read_text(encoding="utf-8"), filename=str(bigcodebench_path))
+    matches = [
+        node
+        for node in parsed.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "_build_bcb_execution_script"
+    ]
+    if len(matches) != 1 or not isinstance(matches[0], ast.FunctionDef):
+        raise RuntimeError("pinned BigCodeBench source has an unexpected helper definition")
+    isolated_module = ast.fix_missing_locations(ast.Module(body=[matches[0]], type_ignores=[]))
+    namespace: dict[str, Any] = {}
+    exec(compile(isolated_module, str(bigcodebench_path), "exec"), namespace)
+    build_execution_script = namespace.get("_build_bcb_execution_script")
+    if not callable(build_execution_script):
+        raise RuntimeError("cannot extract pinned BigCodeBench execution helper")
+    return sanitize_code, build_execution_script
 
 
 def _python_import_modules(*sources: str) -> tuple[str, ...]:
@@ -512,14 +582,7 @@ def _python_spec(gold: dict[str, Any], completion: str) -> ExecutionSpec:
             scorer=scorer,
         )
     if order == 81:
-        _verify_official_olmo_eval_source()
-        try:
-            from olmo_eval.evals.extract import sanitize_code
-            from olmo_eval.evals.tasks.bigcodebench import _build_bcb_execution_script
-        except ImportError as error:
-            raise RuntimeError(
-                "BigCodeBench requires official olmo-eval commit " f"{OFFICIAL_OLMO_EVAL_COMMIT}"
-            ) from error
+        sanitize_code, _build_bcb_execution_script = _load_official_bigcodebench_helpers()
         candidate = str(gold["complete_prompt"]) + completion
         candidate = sanitize_code(candidate, entrypoint=str(gold["entry_point"]))
         code_prompt = str(gold.get("code_prompt") or "")

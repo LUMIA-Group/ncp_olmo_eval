@@ -153,6 +153,24 @@ def test_emit_materializes_scheduler_neutral_gsm8k_plan(
     assert plan["tasks"] == [task["task_path"]]
 
 
+def test_bigcodebench_score_task_seals_explicit_olmo_eval_root(tmp_path: Path) -> None:
+    group = next(
+        item for item in evaluation_cli.CORE_SCORER_GROUPS if int(item["index"]) == 1
+    )
+    command = evaluation_cli._score_command(
+        {},
+        "core88",
+        {"attempt_root": str(tmp_path / "inference")},
+        tmp_path / "scores",
+        "score-bigcodebench",
+        group=group,
+        partition_index=0,
+        partition_count=int(group["partition_count"]),
+    )
+    assert command.env["OLMO_EVAL_COMMIT"] == evaluation_cli.OLMO_EVAL_COMMIT
+    assert command.env["OLMO_EVAL_ROOT"] == str(evaluation_cli.OLMO_EVAL_ROOT)
+
+
 def test_task_specs_reject_serialized_secrets(tmp_path: Path) -> None:
     spec = TaskSpec(
         task_id="safe-task",

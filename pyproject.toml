@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Reproducible vLLM evaluation for OLMo and NCP OLMo"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,8 +22,8 @@ classifiers = [
 dependencies = [
   "numpy>=1.26,<3",
   "safetensors>=0.4.5",
-  "huggingface-hub>=0.36,<2",
-  "transformers>=5.0,<6",
+  "huggingface-hub==0.36.2",
+  "transformers==4.57.6",
 ]
 
 [project.urls]
@@ -34,10 +34,18 @@ Issues = "https://github.com/LuckySJTU/ncp_olmo_eval/issues"
 vllm = [
   "torch==2.9.*",
   "vllm==0.13.0",
+  "sympy==1.14.0",
+  "antlr4-python3-runtime==4.11",
   "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
 ]
 gsm8k = [
+  "sympy==1.14.0",
+  "antlr4-python3-runtime==4.11",
   "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
+]
+scoring = [
+  "sympy==1.14.0",
+  "antlr4-python3-runtime==4.11",
 ]
 dev = [
   "build>=1.2",
@@ -56,6 +64,7 @@ ncp-olmo-eval = "ncp_olmo_eval.evaluation_cli:main"
 ncp-olmo-eval-prepare = "ncp_olmo_eval.prepare_cli:main"
 ncp-olmo-eval-task = "ncp_olmo_eval.task_runner:main"
 ncp-olmo-eval-assets = "ncp_olmo_eval.assets:main"
+ncp-olmo-eval-runtime-smoke = "ncp_olmo_eval.runtime_smoke:main"
 
 [project.entry-points."vllm.general_plugins"]
 ncp_olmo = "ncp_olmo_eval.vllm_plugin.plugin:register"

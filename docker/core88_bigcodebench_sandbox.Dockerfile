@@ -38,7 +38,7 @@ RUN set -eux; \
       '  "runtime_prefix": "/usr/local",' \
       "  \"upstream_reference\": \"${CORE88_UPSTREAM_REFERENCE}\"," \
       "  \"scorer_commit\": \"${CORE88_SCORER_COMMIT}\"," \
-      '  "sandbox_layer": "bubblewrap-plus-locked-olmo-eval-parser-wheels",' \
+      '  "sandbox_layer": "bubblewrap-plus-locked-parser-wheels-no-task-registry-import",' \
       "  \"tree_sitter_sha256\": \"${TREE_SITTER_SHA256}\"," \
       "  \"tree_sitter_python_sha256\": \"${TREE_SITTER_PYTHON_SHA256}\"" \
       '}' \
@@ -48,7 +48,7 @@ ENV CORE88_RUNTIME_PREFIX=/usr/local
 ENV CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps
 
 LABEL org.opencontainers.image.source="https://github.com/allenai/OLMo-core" \
-      org.opencontainers.image.description="Pinned BigCodeBench Core88 bubblewrap scorer layer" \
+      org.opencontainers.image.description="Pinned BigCodeBench scorer without OLMo-Eval registry imports" \
       org.opencontainers.image.base.name="${CORE88_UPSTREAM_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \
       org.opencontainers.image.vendor="NCP OLMo contributors"
