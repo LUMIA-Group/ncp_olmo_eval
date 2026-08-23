@@ -11,7 +11,9 @@ def add_lmdeploy_args(_: Any) -> None:
     return None
 
 
-def validate_lmdeploy_args(*_: Any, **__: Any) -> None:
+def validate_lmdeploy_args(args: Any, *_: Any, **__: Any) -> None:
+    if getattr(args, "hf_backend", None) != LMDEPLOY_BACKEND:
+        return
     raise RuntimeError("LMDeploy is not included in ncp-olmo-eval")
 
 

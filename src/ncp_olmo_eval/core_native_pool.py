@@ -420,16 +420,18 @@ def _validate_args(args: argparse.Namespace, plan: dict[str, Any]) -> None:
         )
     if args.gpus <= 0 or args.processes_per_gpu <= 0:
         raise ValueError("gpus and processes_per_gpu must be positive")
-    validate_native_vllm_args(
-        args,
-        batch_size=max(args.score_batch_size, args.generation_batch_size),
-        processes_per_gpu=args.processes_per_gpu,
-    )
-    validate_lmdeploy_args(
-        args,
-        batch_size=max(args.score_batch_size, args.generation_batch_size),
-        processes_per_gpu=args.processes_per_gpu,
-    )
+    if args.hf_backend == NATIVE_VLLM_BACKEND:
+        validate_native_vllm_args(
+            args,
+            batch_size=max(args.score_batch_size, args.generation_batch_size),
+            processes_per_gpu=args.processes_per_gpu,
+        )
+    elif args.hf_backend == LMDEPLOY_BACKEND:
+        validate_lmdeploy_args(
+            args,
+            batch_size=max(args.score_batch_size, args.generation_batch_size),
+            processes_per_gpu=args.processes_per_gpu,
+        )
     if args.machine_count != int(plan["machine_count"]):
         raise ValueError("machine count does not match the dispatch plan")
     if args.global_seed != int(plan["global_seed"]):

@@ -470,16 +470,18 @@ def main() -> None:
         )
     if args.continuous_batching and not args.active_compaction:
         raise ValueError("continuous batching requires --active-compaction")
-    validate_native_vllm_args(
-        args,
-        batch_size=args.batch_size,
-        model_source=args.model_source,
-    )
-    validate_lmdeploy_args(
-        args,
-        batch_size=args.batch_size,
-        model_source=args.model_source,
-    )
+    if args.hf_backend == NATIVE_VLLM_BACKEND:
+        validate_native_vllm_args(
+            args,
+            batch_size=args.batch_size,
+            model_source=args.model_source,
+        )
+    elif args.hf_backend == LMDEPLOY_BACKEND:
+        validate_lmdeploy_args(
+            args,
+            batch_size=args.batch_size,
+            model_source=args.model_source,
+        )
     if args.hf_backend == NATIVE_VLLM_BACKEND:
         if world_size != 1:
             raise ValueError(

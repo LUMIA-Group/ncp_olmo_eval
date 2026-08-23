@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0a6
+
+- Gate LMDeploy argument validation on the selected backend in the Core88
+  worker pool and standalone GSM8K evaluator. Public vLLM jobs no longer enter
+  the intentionally unavailable LMDeploy compatibility boundary.
+- Make the omitted-LMDeploy validator itself a no-op for non-LMDeploy
+  backends, while continuing to fail closed when LMDeploy is explicitly
+  selected.
+- Add a regression test for both sides of that backend boundary.
+
 ## 0.1.0a5
 
 - Remove the unpublished LMDeploy verification flag from portable vLLM

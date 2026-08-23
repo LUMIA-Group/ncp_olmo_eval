@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ncp_olmo_eval import core_native_pool
 from ncp_olmo_eval.core_native_eval import (
     _max_inference_batch_size,
     _model_manifest_paths,
@@ -89,6 +90,58 @@ def test_core88_engine_capacity_covers_scoring_and_generation_batches() -> None:
     assert (
         _max_inference_batch_size(SimpleNamespace(score_batch_size=1, generation_batch_size=8)) == 8
     )
+
+
+def test_core_pool_validates_only_the_selected_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native_calls: list[tuple[int, int]] = []
+
+    def reject_lmdeploy(*_args, **_kwargs) -> None:
+        raise AssertionError("LMDeploy validation must not run for native_vllm")
+
+    monkeypatch.setattr(
+        core_native_pool,
+        "validate_native_vllm_args",
+        lambda _args, *, batch_size, processes_per_gpu: native_calls.append(
+            (batch_size, processes_per_gpu)
+        ),
+    )
+    monkeypatch.setattr(
+        core_native_pool,
+        "validate_lmdeploy_args",
+        reject_lmdeploy,
+    )
+    monkeypatch.setattr(core_native_pool, "_file_sha256", lambda _path: "sealed-summary")
+    args = SimpleNamespace(
+        score_batch_size=8,
+        generation_batch_size=8,
+        pad_multiple=128,
+        hf_backend="native_vllm",
+        gpus=8,
+        processes_per_gpu=1,
+        machine_count=4,
+        global_seed=42,
+        profile="core88",
+        limit_per_task=0,
+        generation_samples_cap=0,
+        max_gen_tokens_cap=0,
+        data_root=tmp_path,
+    )
+    plan = {
+        "machine_count": 4,
+        "global_seed": 42,
+        "profile": "core88",
+        "limit_per_task": 0,
+        "generation_samples_cap": 0,
+        "max_gen_tokens_cap": 0,
+        "data_root": str(tmp_path.resolve()),
+        "data_summary_sha256": "sealed-summary",
+    }
+
+    core_native_pool._validate_args(args, plan)
+
+    assert native_calls == [(8, 1)]
 
 
 def test_native_vllm_generation_preserves_local_completion_schema(tmp_path: Path) -> None:

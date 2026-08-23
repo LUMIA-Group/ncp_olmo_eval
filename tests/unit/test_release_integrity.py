@@ -3,10 +3,12 @@ from __future__ import annotations
 import ast
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ncp_olmo_eval import device_layout
+from ncp_olmo_eval.lmdeploy_inference import LMDEPLOY_BACKEND, validate_lmdeploy_args
 
 
 def _published_modules(package_root: Path) -> set[str]:
@@ -64,6 +66,12 @@ def test_published_commands_do_not_reference_internal_lmdeploy_flags() -> None:
         if "--no-allow-unverified-lmdeploy" in path.read_text(encoding="utf-8")
     ]
     assert not leaked, "internal LMDeploy flag leaked into published commands: " + ", ".join(leaked)
+
+
+def test_omitted_lmdeploy_validation_is_backend_gated() -> None:
+    validate_lmdeploy_args(SimpleNamespace(hf_backend="native_vllm"), batch_size=8)
+    with pytest.raises(RuntimeError, match="LMDeploy is not included"):
+        validate_lmdeploy_args(SimpleNamespace(hf_backend=LMDEPLOY_BACKEND), batch_size=8)
 
 
 def test_device_layout_maps_independent_workers(
