@@ -9,7 +9,7 @@ import pytest
 
 from ncp_olmo_eval import assets
 from ncp_olmo_eval.source_identity import package_tree_sha256, source_state
-from ncp_olmo_eval.task_runner import _resolved_argv, run_task
+from ncp_olmo_eval.task_runner import _resolved_argv, _task_environment, run_task
 from ncp_olmo_eval.task_spec import Resources, TaskSpec, read_status, write_task
 
 
@@ -125,3 +125,28 @@ def test_task_python_can_be_selected_by_container_executor() -> None:
 def test_task_python_override_rejects_non_python_command() -> None:
     with pytest.raises(RuntimeError, match="only replace a Python"):
         _resolved_argv(("bash", "script.sh"), {"NCP_OLMO_TASK_PYTHON": sys.executable})
+
+
+def test_task_environment_preserves_image_local_bigcodebench_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dependency_root = tmp_path / "olmo-eval-deps"
+    dependency_root.mkdir()
+    monkeypatch.setenv("CORE88_OLMO_EVAL_DEPS", str(dependency_root))
+    monkeypatch.setenv("PYTHONPATH", "/image/default")
+
+    env = _task_environment({"PYTHONPATH": "/sealed/olmo-eval/src:/release/runtime"})
+
+    assert env["PYTHONPATH"].split(":") == [
+        str(dependency_root),
+        "/sealed/olmo-eval/src",
+        "/release/runtime",
+    ]
+
+
+def test_task_environment_rejects_missing_bigcodebench_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CORE88_OLMO_EVAL_DEPS", str(tmp_path / "missing"))
+    with pytest.raises(RuntimeError, match="existing absolute directory"):
+        _task_environment({})

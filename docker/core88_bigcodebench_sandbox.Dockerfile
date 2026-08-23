@@ -15,17 +15,17 @@ ARG TREE_SITTER_PYTHON_SHA256
 USER root
 
 COPY --from=sandbox_tools /usr/bin/bwrap /usr/bin/bwrap
-COPY ${TREE_SITTER_WHEEL} /tmp/core88-wheels/
-COPY ${TREE_SITTER_PYTHON_WHEEL} /tmp/core88-wheels/
+COPY ${TREE_SITTER_WHEEL} /tmp/core88-wheels/tree_sitter.whl
+COPY ${TREE_SITTER_PYTHON_WHEEL} /tmp/core88-wheels/tree_sitter_python.whl
 
 RUN set -eux; \
-    echo "${TREE_SITTER_SHA256}  /tmp/core88-wheels/${TREE_SITTER_WHEEL}" | sha256sum -c -; \
-    echo "${TREE_SITTER_PYTHON_SHA256}  /tmp/core88-wheels/${TREE_SITTER_PYTHON_WHEEL}" | sha256sum -c -; \
+    echo "${TREE_SITTER_SHA256}  /tmp/core88-wheels/tree_sitter.whl" | sha256sum -c -; \
+    echo "${TREE_SITTER_PYTHON_SHA256}  /tmp/core88-wheels/tree_sitter_python.whl" | sha256sum -c -; \
     mkdir -p /opt/core88/olmo-eval-deps /opt/core88/image; \
     /usr/local/bin/python3 -m zipfile -e \
-      "/tmp/core88-wheels/${TREE_SITTER_WHEEL}" /opt/core88/olmo-eval-deps; \
+      /tmp/core88-wheels/tree_sitter.whl /opt/core88/olmo-eval-deps; \
     /usr/local/bin/python3 -m zipfile -e \
-      "/tmp/core88-wheels/${TREE_SITTER_PYTHON_WHEEL}" /opt/core88/olmo-eval-deps; \
+      /tmp/core88-wheels/tree_sitter_python.whl /opt/core88/olmo-eval-deps; \
     test -f /opt/core88/olmo-eval-deps/tree_sitter/__init__.py; \
     test -f /opt/core88/olmo-eval-deps/tree_sitter_python/_binding.abi3.so; \
     rm -rf /tmp/core88-wheels; \
@@ -44,8 +44,12 @@ RUN set -eux; \
       '}' \
       > /opt/core88/image/RUNTIME.json
 
-ENV CORE88_RUNTIME_PREFIX=/usr/local
-ENV CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps
+ENV CORE88_RUNTIME_PREFIX=/usr/local \
+    CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps \
+    PYTHONPATH=/opt/core88/olmo-eval-deps
+
+RUN /usr/local/bin/python3 -c \
+      'import tree_sitter, tree_sitter_python; print(tree_sitter.__file__, tree_sitter_python.__file__)'
 
 LABEL org.opencontainers.image.source="https://github.com/allenai/OLMo-core" \
       org.opencontainers.image.description="Pinned BigCodeBench scorer without OLMo-Eval registry imports" \

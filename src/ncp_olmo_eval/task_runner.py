@@ -13,6 +13,27 @@ from typing import Sequence
 from .task_spec import read_status, read_task, write_status
 
 
+def _task_environment(spec_env: dict[str, str]) -> dict[str, str]:
+    """Merge a task environment without hiding image-local scorer modules."""
+
+    env = os.environ.copy()
+    env.update(spec_env)
+    scorer_dependencies = env.get("CORE88_OLMO_EVAL_DEPS", "").strip()
+    if not scorer_dependencies:
+        return env
+    dependency_root = Path(scorer_dependencies)
+    if not dependency_root.is_absolute() or not dependency_root.is_dir():
+        raise RuntimeError(
+            "CORE88_OLMO_EVAL_DEPS must name an existing absolute directory: "
+            f"{scorer_dependencies!r}"
+        )
+    python_path = [value for value in env.get("PYTHONPATH", "").split(os.pathsep) if value]
+    if scorer_dependencies not in python_path:
+        python_path.insert(0, scorer_dependencies)
+    env["PYTHONPATH"] = os.pathsep.join(python_path)
+    return env
+
+
 def _resolved_argv(argv: Sequence[str], env: dict[str, str]) -> list[str]:
     resolved = list(argv)
     replacement = env.get("NCP_OLMO_TASK_PYTHON", "").strip()
@@ -41,8 +62,7 @@ def run_task(spec_path: Path) -> dict[str, object]:
     Path(spec.output_root).mkdir(parents=True, exist_ok=True)
     log_path = Path(spec.log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env.update(spec.env)
+    env = _task_environment(spec.env)
     argv = _resolved_argv(spec.argv, env)
     write_status(Path(spec.status_path), spec=spec, state="Running")
     try:

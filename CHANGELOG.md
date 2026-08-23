@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0a8
+
+- Expose the locked BigCodeBench parser wheels at
+  `/opt/core88/olmo-eval-deps` through the formal sandbox image's
+  `PYTHONPATH`, and verify both `tree_sitter` modules during the image build.
+- Give copied parser wheels fixed container-side names, allowing formal builds
+  to use either root-level files or paths nested inside the build context.
+- Preserve that image-local dependency directory after task-spec environment
+  merging, so an explicit OLMo-Eval source `PYTHONPATH` cannot hide the
+  sandbox's parser modules.
+- Replace the synthetic BigCodeBench CI layer with a build and execution of
+  the published `core88_bigcodebench_sandbox.Dockerfile`, using the same
+  locked-wheel extraction layout as the release image.
+
 ## 0.1.0a7
 
 - Pin the mutually compatible and previously GPU-validated dependency pair
