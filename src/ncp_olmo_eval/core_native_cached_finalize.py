@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from .core88_workflow import load_workflow, validate_core_run_manifest, verify_inputs
-from .core_native_aggregate import _evaluator_repo_state, _validate_evaluator_repo_state
+from .core_native_aggregate import _evaluator_repo_state
 from .core_native_code_eval import MULTIPLE_CORE88_LANGUAGES
 from .core_native_eval import _file_sha256, _pass_at_k, _write_json_atomic, _write_scores_csv
 from .core_native_summary import (
     DIAGNOSTIC_SUMMARY_STATUS,
+    _reported_evaluator_state,
+    _validate_reported_evaluator,
     build_core88_summary,
     write_prepared_core88_summary_csv,
 )
@@ -147,11 +149,13 @@ def merge_cached_report(
         raise RuntimeError("Core88 prediction score snapshot is not prediction-complete")
     if report.get("prediction_task_count_complete") != report.get("task_count"):
         raise RuntimeError("Core88 prediction score snapshot has incomplete predictions")
-    evaluator_state = _evaluator_repo_state()
-    if evaluator_state["evaluator_repo_dirty"]:
-        raise RuntimeError("cached Core88 finalize requires a clean evaluator repository")
-    if report.get("evaluator_repo_commit") != evaluator_state["evaluator_repo_commit"]:
-        raise RuntimeError("prediction score snapshot was created by a different evaluator commit")
+    reported_evaluator = _reported_evaluator_state(report)
+    if reported_evaluator["evaluator_repo_dirty"] is not False:
+        raise RuntimeError("prediction score snapshot records a dirty evaluator repository")
+    if not str(reported_evaluator["evaluator_repo_commit"] or ""):
+        raise RuntimeError("prediction score snapshot is missing its evaluator commit")
+    if len(str(reported_evaluator["evaluator_source_tree_sha256"] or "")) != 64:
+        raise RuntimeError("prediction score snapshot is missing its evaluator source-tree digest")
 
     task_counts, subset_counts, example_counts = _merge_code_summaries(
         report, summary_paths, verify_code_result_hashes=verify_code_result_hashes
@@ -236,7 +240,6 @@ def merge_cached_report(
         if pass_at_4_values:
             task["pass@4"] = sum(pass_at_4_values) / len(pass_at_4_values)
 
-    report.update(evaluator_state)
     code_result_files = [str(_read_json(path)["output_jsonl"]) for path in summary_paths]
     report.update(
         {
@@ -282,11 +285,15 @@ def main() -> None:
     report = merge_cached_report(
         base_report, summary_paths, verify_code_result_hashes=args.verify_code_result_hashes
     )
+    finalizer_state = _evaluator_repo_state()
+    if finalizer_state["evaluator_repo_dirty"] is not False:
+        raise RuntimeError("cached Core88 finalizer repository must be clean")
+    report["finalizer_evaluator_state"] = finalizer_state
     if args.workflow_manifest is not None:
         workflow = load_workflow(args.workflow_manifest)
-        report["evaluator_compatibility"] = _validate_evaluator_repo_state(
+        report["evaluator_compatibility"] = _validate_reported_evaluator(
             workflow,
-            _evaluator_repo_state(),
+            report,
             allow_descendant=args.allow_scoring_evaluator_descendant,
         )
         if report.get("workflow_id") != workflow.get("workflow_id"):

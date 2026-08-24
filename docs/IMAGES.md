@@ -8,10 +8,10 @@ Build from a clean source revision:
 docker build -f docker/runtime.Dockerfile \
   --build-arg BASE_IMAGE='vllm/vllm-openai@sha256:REPLACE_WITH_PINNED_DIGEST' \
   --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
-  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a9 .
-docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a9
+  -t ghcr.io/ORG/ncp-olmo-eval:0.1.0a10 .
+docker push ghcr.io/ORG/ncp-olmo-eval:0.1.0a10
 docker inspect --format '{{index .RepoDigests 0}}' \
-  ghcr.io/ORG/ncp-olmo-eval:0.1.0a9
+  ghcr.io/ORG/ncp-olmo-eval:0.1.0a10
 ```
 
 The base image must expose Python 3.12 or newer as `python3` (override
