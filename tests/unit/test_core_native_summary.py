@@ -622,6 +622,29 @@ def test_same_run_vllm_gsm8k_rejects_another_workflow(
         )
 
 
+def test_same_run_gsm8k_accepts_matching_installed_package_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report, gsm8k_root, workflow_manifest = _same_run_gsm8k(tmp_path, monkeypatch)
+    workflow = json.loads(workflow_manifest.read_text(encoding="utf-8"))
+    expected_tree = workflow["source_identity"]["tree_sha256"]
+    report.update(
+        evaluator_repo_root=str(tmp_path / "installed" / "site-packages" / "ncp_olmo_eval"),
+        evaluator_source_kind="installed-package",
+        evaluator_source_tree_sha256=expected_tree,
+        evaluator_package_version="0.1.0a9",
+    )
+
+    _, metadata = build_core88_summary(
+        report,
+        gsm8k_results_root=gsm8k_root,
+        workflow_manifest=workflow_manifest,
+    )
+
+    assert metadata["status"] == "CORE88_FIXED_SUMMARY_OK"
+    assert metadata["final_output_eligible"] is True
+
+
 def test_same_run_vllm_gsm8k_rejects_post_seal_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

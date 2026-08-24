@@ -314,6 +314,19 @@ def _same_run_request_seed(doc_index: int, base_seed: int = GSM8K_SEED) -> int:
     return int.from_bytes(hashlib.sha256(payload).digest()[:4], "big")
 
 
+def _reported_evaluator_state(report: dict[str, Any]) -> dict[str, Any]:
+    """Preserve the path-independent scorer identity recorded by aggregation."""
+
+    return {
+        "evaluator_repo_root": report.get("evaluator_repo_root"),
+        "evaluator_repo_commit": report.get("evaluator_repo_commit"),
+        "evaluator_repo_dirty": report.get("evaluator_repo_dirty"),
+        "evaluator_source_kind": report.get("evaluator_source_kind"),
+        "evaluator_source_tree_sha256": report.get("evaluator_source_tree_sha256"),
+        "evaluator_package_version": report.get("evaluator_package_version"),
+    }
+
+
 def _load_same_run_gsm8k_score(
     root: Path, report: dict[str, Any], workflow_manifest: Path
 ) -> dict[str, Any]:
@@ -335,11 +348,7 @@ def _load_same_run_gsm8k_score(
         raise RuntimeError("Core88 and GSM8K do not share one repository commit")
     compatibility = validate_scoring_evaluator_repo(
         workflow,
-        {
-            "evaluator_repo_root": report.get("evaluator_repo_root"),
-            "evaluator_repo_commit": report.get("evaluator_repo_commit"),
-            "evaluator_repo_dirty": report.get("evaluator_repo_dirty"),
-        },
+        _reported_evaluator_state(report),
         allow_descendant=(
             isinstance(report.get("evaluator_compatibility"), dict)
             and report["evaluator_compatibility"].get("status")
