@@ -327,6 +327,18 @@ def _reported_evaluator_state(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_reported_evaluator(
+    workflow: dict[str, Any], report: dict[str, Any], *, allow_descendant: bool = False
+) -> dict[str, Any]:
+    """Validate the evaluator identity preserved in a scored Core88 report."""
+
+    return validate_scoring_evaluator_repo(
+        workflow,
+        _reported_evaluator_state(report),
+        allow_descendant=allow_descendant,
+    )
+
+
 def _load_same_run_gsm8k_score(
     root: Path, report: dict[str, Any], workflow_manifest: Path
 ) -> dict[str, Any]:
@@ -346,9 +358,9 @@ def _load_same_run_gsm8k_score(
         raise RuntimeError("Core88 and GSM8K do not share one workflow id")
     if report.get("repo_commit") != workflow.get("repo_commit"):
         raise RuntimeError("Core88 and GSM8K do not share one repository commit")
-    compatibility = validate_scoring_evaluator_repo(
+    compatibility = _validate_reported_evaluator(
         workflow,
-        _reported_evaluator_state(report),
+        report,
         allow_descendant=(
             isinstance(report.get("evaluator_compatibility"), dict)
             and report["evaluator_compatibility"].get("status")

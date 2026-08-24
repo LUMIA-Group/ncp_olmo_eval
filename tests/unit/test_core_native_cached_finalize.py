@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from ncp_olmo_eval import core_native_cached_finalize
 from ncp_olmo_eval.core_native_cached_finalize import (
     CODE_SCORER_CONTRACT,
     merge_cached_report,
 )
 from ncp_olmo_eval.core_native_code_eval import MULTIPLE_CORE88_LANGUAGES
+from ncp_olmo_eval.core_native_summary import _validate_reported_evaluator
 
 
 def _base_report(tmp_path: Path) -> dict:
@@ -40,7 +40,12 @@ def _base_report(tmp_path: Path) -> dict:
         "profile": "core88",
         "data_summary_sha256": "data-sha",
         "input_roots": [str(tmp_path / "inference")],
+        "evaluator_repo_root": "/sealed/scoring/checkout",
         "evaluator_repo_commit": "evaluator-commit",
+        "evaluator_repo_dirty": False,
+        "evaluator_source_kind": "installed-package",
+        "evaluator_source_tree_sha256": "a" * 64,
+        "evaluator_package_version": "0.1.0a8",
         "task_count": 88,
         "prediction_task_count_complete": 88,
         "score_task_count_complete": 80,
@@ -118,20 +123,9 @@ def _code_summaries(tmp_path: Path, report: dict) -> list[Path]:
     return paths
 
 
-def test_cached_finalize_merges_code_summaries_without_raw_results(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cached_finalize_merges_code_summaries_without_raw_results(tmp_path: Path) -> None:
     report = _base_report(tmp_path)
     summaries = _code_summaries(tmp_path, report)
-    monkeypatch.setattr(
-        core_native_cached_finalize,
-        "_evaluator_repo_state",
-        lambda: {
-            "evaluator_repo_root": "/repo",
-            "evaluator_repo_commit": "evaluator-commit",
-            "evaluator_repo_dirty": False,
-        },
-    )
 
     merged = merge_cached_report(report, summaries)
 
@@ -144,25 +138,47 @@ def test_cached_finalize_merges_code_summaries_without_raw_results(
         "raw_code_result_files_reopened": 0,
         "code_result_hashes_verified": False,
     }
+    assert merged["evaluator_repo_root"] == "/sealed/scoring/checkout"
+    assert merged["evaluator_repo_commit"] == "evaluator-commit"
+    assert merged["evaluator_source_tree_sha256"] == "a" * 64
+    assert merged["evaluator_package_version"] == "0.1.0a8"
     tasks = {task["task_order"]: task for task in merged["tasks"]}
     assert tasks[79]["primary_score"] == 1.0
     assert tasks[86]["primary_score"] == 0.5
     assert set(tasks[86]["subset_scores"]) == set(MULTIPLE_CORE88_LANGUAGES)
 
 
-def test_cached_finalize_rejects_a_stale_prediction_scorer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_cached_finalize_validates_reported_scorer_across_install_paths(tmp_path: Path) -> None:
+    report = _base_report(tmp_path)
+    workflow = {
+        "repo_root": "/sealed/workflow/checkout",
+        "repo_commit": "evaluator-commit",
+        "source_identity": {
+            "kind": "installed-package",
+            "revision": "evaluator-commit",
+            "tree_sha256": "a" * 64,
+        },
+    }
+
+    proof = _validate_reported_evaluator(workflow, report)
+
+    assert proof["status"] == "CORE88_EVALUATOR_EXACT_WORKFLOW_COMMIT"
+    assert proof["workflow_repo_root"] != proof["evaluator_repo_root"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("evaluator_repo_dirty", True, "dirty evaluator"),
+        ("evaluator_repo_commit", "", "missing its evaluator commit"),
+        ("evaluator_source_tree_sha256", "", "source-tree digest"),
+    ],
+)
+def test_cached_finalize_rejects_incomplete_reported_evaluator(
+    tmp_path: Path, field: str, value: object, message: str
 ) -> None:
     report = _base_report(tmp_path)
-    monkeypatch.setattr(
-        core_native_cached_finalize,
-        "_evaluator_repo_state",
-        lambda: {
-            "evaluator_repo_root": "/repo",
-            "evaluator_repo_commit": "new-commit",
-            "evaluator_repo_dirty": False,
-        },
-    )
+    report[field] = value
 
-    with pytest.raises(RuntimeError, match="different evaluator commit"):
+    with pytest.raises(RuntimeError, match=message):
         merge_cached_report(report, [])

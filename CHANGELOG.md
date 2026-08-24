@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0a10
+
+- Separate the immutable evaluator identity recorded in a Core88 prediction-score
+  snapshot from the installed release that only materializes the final tables.
+- Preserve and validate the cached scorer commit/tree against the workflow even
+  when the clean finalizer is installed at another path or comes from a newer
+  release; record the finalizer identity independently in the output report.
+- Extend the clean-wheel regression smoke to cover cached Core88 finalization
+  across distinct workflow, scorer, and installed-package paths.
+
 ## 0.1.0a9
 
 - Preserve the installed evaluator package tree SHA-256 when the fixed Core88
