@@ -32,6 +32,12 @@ jobs:
           python -m py_compile scripts/*.py
       - name: Build distributions
         run: python -m build
+      - name: Verify Core88 summary from installed wheel path
+        run: |
+          python -m venv .ci/installed-package
+          .ci/installed-package/bin/python -m pip install --no-deps dist/*.whl
+          NCP_OLMO_SOURCE_REVISION="$(git rev-parse HEAD)" \
+            .ci/installed-package/bin/python tests/installed_package_summary_smoke.py
 
   docker-scorer-contracts:
     runs-on: ubuntu-latest

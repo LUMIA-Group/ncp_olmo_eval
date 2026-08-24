@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0a9
+
+- Preserve the installed evaluator package tree SHA-256 when the fixed Core88
+  30-column summary revalidates a workflow-bound GSM8K companion.
+- Add a regression contract for matching evaluator packages installed at a
+  different absolute path from the workflow checkout, including a clean-wheel
+  installation smoke in CI.
+
 ## 0.1.0a8
 
 - Expose the locked BigCodeBench parser wheels at
