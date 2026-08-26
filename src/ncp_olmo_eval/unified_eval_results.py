@@ -211,6 +211,7 @@ def finalize_result(
     score = _read_json(score_path)
     expected_files = {
         "gsm8k": ("score.json", "gsm8k-score.csv", "gsm8k-scored.jsonl"),
+        "sciq": ("score.json", "sciq-score.csv"),
         "ruler": ("score.json", "ruler-summary.csv", "ruler-task-by-length.csv"),
         "helmet": (
             "score.json",
@@ -260,7 +261,7 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument("--output-root", type=Path, required=True)
     final = subparsers.add_parser("finalize")
     final.add_argument(
-        "--benchmark", choices=("gsm8k", "ruler", "helmet"), required=True
+        "--benchmark", choices=("gsm8k", "sciq", "ruler", "helmet"), required=True
     )
     final.add_argument("--scoring-root", type=Path, required=True)
     final.add_argument("--output-root", type=Path, required=True)

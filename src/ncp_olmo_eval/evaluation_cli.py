@@ -15,6 +15,7 @@ import dataclasses
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -49,7 +50,7 @@ CORE88_VLLM_MAX_MODEL_LEN = 8192
 MODEL_SCHEMA_VERSION = "conceptlm-unified-evaluation-model-v1"
 BENCHMARK_SCHEMA_VERSION = "conceptlm-unified-evaluation-benchmark-v1"
 BACKENDS = ("vllm",)
-BENCHMARKS = ("gsm8k", "core88", "ruler", "helmet")
+BENCHMARKS = ("gsm8k", "sciq", "core88", "ruler", "helmet")
 LONG_CONTEXT_LENGTHS = {"ruler": RULER_SEQUENCE_LENGTHS, "helmet": HELMET_SWEEP_INPUT_LENGTHS}
 BACKEND_NAMES = {"vllm": "native_vllm"}
 ACTIVE_STATES = frozenset({"Planned", "Running"})
@@ -60,6 +61,12 @@ KNOWN_STATES = ACTIVE_STATES | SUCCESS_STATES | RETRYABLE_STATES
 CORE_DATA_ROOT = Path(
     os.environ.get("NCP_OLMO_CORE88_DATA_ROOT", str(_CACHE_ROOT / "core88"))
 ).expanduser()
+SCIQ_SOURCE_PROFILE = "all_supported_local"
+SCIQ_TASK_ORDER = 348
+SCIQ_TASK_NAME = "olmo_eval_sciq"
+SCIQ_EXAMPLE_COUNT = 1000
+SCIQ_SOURCE_FILE = "all_supported_local/348_olmo_eval_sciq.jsonl.gz"
+SCIQ_SOURCE_SHA256 = "b0bf31832d352e29b846f0e05893b1ffcef9d7ba2d4c350fdb36fad1f9fa0db3"
 PREPARED_DATA_ROOT = Path(
     os.environ.get("NCP_OLMO_PREPARED_DATA_ROOT", str(_CACHE_ROOT / "prepared"))
 ).expanduser()
@@ -553,6 +560,24 @@ def protocol_for(backend: str, benchmark: str) -> dict[str, Any]:
                 "sampling_seed": DEFAULT_GLOBAL_SEED,
             }
         )
+    elif benchmark == "sciq":
+        protocol.update(
+            {
+                "request_type": "loglikelihood",
+                "metric": "acc",
+                "num_fewshot": 0,
+                "samples_per_example": 1,
+                "sampling": False,
+                "global_seed": DEFAULT_GLOBAL_SEED,
+                "machine_count": 1,
+                "source_profile": SCIQ_SOURCE_PROFILE,
+                "task_order": SCIQ_TASK_ORDER,
+                "task_name": SCIQ_TASK_NAME,
+                "example_count": SCIQ_EXAMPLE_COUNT,
+                "source_file": SCIQ_SOURCE_FILE,
+                "source_sha256": SCIQ_SOURCE_SHA256,
+            }
+        )
     elif benchmark == "core88":
         protocol.update(
             {
@@ -833,6 +858,165 @@ def _gsm8k_command(
         Resources(gpus=8, cpus=64, memory_gib=256),
         output_dir,
         RUNTIME_IMAGE,
+    )
+
+
+def _validate_sciq_source_contract() -> dict[str, Any]:
+    """Validate the exact OLMo SciQ export before materializing a formal plan."""
+
+    from .core_native_eval import _load_manifest
+
+    _, selected = _load_manifest(CORE_DATA_ROOT, SCIQ_SOURCE_PROFILE, {SCIQ_TASK_ORDER})
+    if len(selected) != 1:
+        raise EvaluationError(f"SciQ source selection returned {len(selected)} tasks")
+    task = selected[0]
+    expected = {
+        "task_order": SCIQ_TASK_ORDER,
+        "task": SCIQ_TASK_NAME,
+        "file": SCIQ_SOURCE_FILE,
+        "sha256": SCIQ_SOURCE_SHA256,
+        "num_examples": SCIQ_EXAMPLE_COUNT,
+        "metric": "acc",
+        "request_type": "loglikelihood",
+    }
+    for field, value in expected.items():
+        if task.get(field) != value:
+            raise EvaluationError(
+                f"SciQ source contract mismatch: {field}={task.get(field)!r} != {value!r}"
+            )
+    source = CORE_DATA_ROOT / SCIQ_SOURCE_FILE
+    if _sha256(source) != SCIQ_SOURCE_SHA256:
+        raise EvaluationError(f"SciQ source SHA256 mismatch: {source}")
+    return task
+
+
+def _sciq_command(
+    registration: dict[str, Any], attempt_root: Path, job_name: str
+) -> tuple[CommandSpec, list[str]]:
+    """Build one scheduler-neutral eight-GPU SciQ likelihood task."""
+
+    protocol = protocol_for(str(registration["backend"]), "sciq")
+    plan_root = attempt_root / "dispatch-plan"
+    repo_commit = str(_git_state(_repo_root())["repo_commit"])
+    argv = [
+        PYTHON_BIN,
+        "-m",
+        "ncp_olmo_eval.core_native_pool",
+        "--data-root",
+        str(CORE_DATA_ROOT),
+        "--profile",
+        SCIQ_SOURCE_PROFILE,
+        "--plan-root",
+        str(plan_root),
+        "--machine-index",
+        "0",
+        "--machine-count",
+        "1",
+        "--global-seed",
+        str(DEFAULT_GLOBAL_SEED),
+        "--workflow-id",
+        str(registration["registration_id"]),
+        "--repo-commit",
+        repo_commit,
+        "--hf-model-path",
+        str(registration["checkpoint_path"]),
+        "--model-identity-path",
+        str(registration["checkpoint_path"]),
+        "--tokenizer-model",
+        str(registration["tokenizer_model"]),
+        "--hf-backend",
+        "native_vllm",
+        "--output-root",
+        str(attempt_root),
+        "--model-label",
+        str(registration["registration_name"]),
+        "--gpus",
+        "8",
+        "--processes-per-gpu",
+        "1",
+        "--worker-restarts",
+        "1",
+        "--worker-start-stagger-seconds",
+        "2",
+        "--seq-length",
+        "2048",
+        "--score-batch-size",
+        str(protocol["batch_size"]),
+        "--generation-batch-size",
+        str(protocol["batch_size"]),
+        "--row-chunk-size",
+        str(protocol["batch_size"]),
+        "--pad-multiple",
+        "128",
+        "--progress-every",
+        "100",
+        "--limit-per-task",
+        "0",
+        "--generation-samples-cap",
+        "1",
+        "--max-gen-tokens-cap",
+        "0",
+        "--vllm-max-model-len",
+        str(CORE88_VLLM_MAX_MODEL_LEN),
+        "--vllm-model-family",
+        _model_family(registration),
+        "--vllm-model-overlay-dir",
+        str(attempt_root / "model-overlay-m0"),
+        "--vllm-gpu-memory-utilization",
+        "0.85",
+        "--vllm-execution-mode",
+        "eager",
+        "--vllm-attention-backend",
+        "FLASH_ATTN",
+        "--vllm-flash-attn-version",
+        "3",
+        "--vllm-hlm-attention-impl",
+        "legacy_mixed",
+        "--allow-unverified-native-vllm",
+        "--no-hf-align-dcp-runtime-config",
+        "--verify-data-sha256",
+        "--resume",
+    ]
+    if registration.get("vllm_runtime_config"):
+        argv.extend(["--vllm-runtime-config", str(registration["vllm_runtime_config"])])
+    plan_command = [
+        (
+            str(Path(os.environ.get("PLAN_ENV_PREFIX", "")) / "bin/python")
+            if os.environ.get("PLAN_ENV_PREFIX")
+            else sys.executable
+        ),
+        "-m",
+        "ncp_olmo_eval.core_native_plan",
+        "--data-root",
+        str(CORE_DATA_ROOT),
+        "--profile",
+        SCIQ_SOURCE_PROFILE,
+        "--plan-root",
+        str(plan_root),
+        "--task-orders",
+        str(SCIQ_TASK_ORDER),
+        "--limit-per-task",
+        "0",
+        "--generation-samples-cap",
+        "1",
+        "--max-gen-tokens-cap",
+        "0",
+        "--machine-count",
+        "1",
+        "--global-seed",
+        str(DEFAULT_GLOBAL_SEED),
+        "--decode-weight",
+        "8",
+    ]
+    return (
+        CommandSpec(
+            tuple(argv),
+            _base_launch_env(registration),
+            Resources(gpus=8, cpus=96, memory_gib=512),
+            attempt_root / "machine-00",
+            RUNTIME_IMAGE,
+        ),
+        plan_command,
     )
 
 
@@ -1235,6 +1419,35 @@ def submit_inference(
             commands, _ = _core_commands(registration, attempt_root, names, workflow=workflow)
         elif benchmark == "gsm8k":
             commands = [_gsm8k_command(registration, attempt_root, names[0])]
+        elif benchmark == "sciq":
+            sciq_command, plan_command = _sciq_command(
+                registration, attempt_root, names[0]
+            )
+            plan_root = attempt_root / "dispatch-plan"
+            if not dry_run and not (plan_root / "plan.json").is_file():
+                _validate_sciq_source_contract()
+                plan_root.mkdir(parents=True, exist_ok=True)
+                env = os.environ.copy()
+                env["PYTHONPATH"] = str(_repo_root())
+                result = subprocess.run(
+                    plan_command, check=False, capture_output=True, text=True, env=env
+                )
+                if result.returncode:
+                    raise EvaluationError(
+                        "SciQ 分配计划生成失败：\n"
+                        f"{result.stdout[-4000:]}\n{result.stderr[-4000:]}"
+                    )
+                plan = _read_json(plan_root / "plan.json")
+                if (
+                    plan.get("profile") != SCIQ_SOURCE_PROFILE
+                    or plan.get("task_orders") != [SCIQ_TASK_ORDER]
+                    or int(plan.get("machine_count", -1)) != 1
+                    or int(plan.get("global_seed", -1)) != DEFAULT_GLOBAL_SEED
+                    or int((plan.get("expected_counts") or {}).get(SCIQ_TASK_NAME, -1))
+                    != SCIQ_EXAMPLE_COUNT
+                ):
+                    raise EvaluationError(f"SciQ 分配计划协议不匹配：{plan}")
+            commands = [sciq_command]
         else:
             commands = [
                 _long_context_command(
@@ -1477,6 +1690,137 @@ def _long_context_artifacts(root: Path) -> dict[str, Any]:
     }
 
 
+def _sciq_artifacts(root: Path) -> dict[str, Any]:
+    """Validate the sealed one-host official SciQ inference contract."""
+
+    manifest_path = root / "run_manifest.json"
+    summary_path = root / "summary.json"
+    machine_result_path = root / "machine-00" / "result.json"
+    prediction_paths = sorted(root.glob("machine-00/predictions/*.jsonl"))
+    error = ""
+    prediction_count = 0
+    score: float | None = None
+    try:
+        if not manifest_path.is_file() or not summary_path.is_file():
+            raise ValueError("SciQ run_manifest.json/summary.json is missing")
+        if not machine_result_path.is_file():
+            raise ValueError("SciQ machine-00/result.json is missing")
+        manifest = _read_json(manifest_path)
+        if manifest.get("profile") != SCIQ_SOURCE_PROFILE:
+            raise ValueError(f"unexpected SciQ profile: {manifest.get('profile')}")
+        if manifest.get("task_orders") != [SCIQ_TASK_ORDER]:
+            raise ValueError(f"unexpected SciQ task orders: {manifest.get('task_orders')}")
+        if int(manifest.get("global_seed", -1)) != DEFAULT_GLOBAL_SEED:
+            raise ValueError("SciQ global seed is not 42")
+        if int(manifest.get("machine_count", -1)) != 1:
+            raise ValueError("SciQ machine_count is not 1")
+        if int(manifest.get("gpus_per_machine", -1)) != 8:
+            raise ValueError("SciQ gpus_per_machine is not 8")
+        if manifest.get("hf_backend_requested") != "native_vllm":
+            raise ValueError("SciQ release inference must use native_vllm")
+        if int(manifest.get("score_batch_size", -1)) != 8:
+            raise ValueError("SciQ score batch is not 8")
+        if int(manifest.get("generation_batch_size", -1)) != 8:
+            raise ValueError("SciQ generation batch is not 8")
+        if int(manifest.get("processes_per_gpu", -1)) != 1:
+            raise ValueError("SciQ processes_per_gpu is not 1")
+        tasks = manifest.get("tasks")
+        if not isinstance(tasks, list) or len(tasks) != 1:
+            raise ValueError("SciQ run manifest must contain exactly one task")
+        source_task = tasks[0]
+        expected_task_contract = {
+            "task_order": SCIQ_TASK_ORDER,
+            "task": SCIQ_TASK_NAME,
+            "file": SCIQ_SOURCE_FILE,
+            "sha256": SCIQ_SOURCE_SHA256,
+            "num_examples": SCIQ_EXAMPLE_COUNT,
+            "metric": "acc",
+            "request_type": "loglikelihood",
+        }
+        for field, expected in expected_task_contract.items():
+            if source_task.get(field) != expected:
+                raise ValueError(
+                    f"SciQ source contract mismatch: {field}={source_task.get(field)!r} "
+                    f"!= {expected!r}"
+                )
+
+        machine = _read_json(machine_result_path)
+        if machine.get("status") != "CORE_NATIVE_MACHINE_OK":
+            raise ValueError(f"SciQ machine status is {machine.get('status')}")
+        if machine.get("artifact_mutated") is not False:
+            raise ValueError("SciQ model artifact mutation was not ruled out")
+        if machine.get("source_artifact_mutated") is not False:
+            raise ValueError("SciQ source artifact mutation was not ruled out")
+        if machine.get("completed_work_items") != machine.get("planned_work_items"):
+            raise ValueError("SciQ machine work coverage is incomplete")
+
+        summary = _read_json(summary_path)
+        if summary.get("status") != "CORE_NATIVE_POOL_OK":
+            raise ValueError(f"SciQ pool status is {summary.get('status')}")
+        if int(summary.get("task_count", -1)) != 1:
+            raise ValueError("SciQ summary task_count is not 1")
+        if int(summary.get("prediction_task_count_complete", -1)) != 1:
+            raise ValueError("SciQ prediction task is incomplete")
+        if int(summary.get("score_task_count_complete", -1)) != 1:
+            raise ValueError("SciQ score task is incomplete")
+        if int(summary.get("expected_predictions", -1)) != SCIQ_EXAMPLE_COUNT:
+            raise ValueError("SciQ expected prediction count is not 1000")
+        if int(summary.get("observed_predictions", -1)) != SCIQ_EXAMPLE_COUNT:
+            raise ValueError("SciQ observed prediction count is not 1000")
+        summary_tasks = summary.get("tasks")
+        if not isinstance(summary_tasks, list) or len(summary_tasks) != 1:
+            raise ValueError("SciQ summary must contain exactly one task")
+        task = summary_tasks[0]
+        if (
+            task.get("task_order") != SCIQ_TASK_ORDER
+            or task.get("task") != SCIQ_TASK_NAME
+            or task.get("metric") != "acc"
+            or task.get("request_type") != "loglikelihood"
+            or task.get("score_status") != "SCORED"
+        ):
+            raise ValueError(f"SciQ scored task contract is invalid: {task}")
+        score = float(task["primary_score"])
+        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+            raise ValueError(f"SciQ score is invalid: {score}")
+
+        seen: set[str] = set()
+        for path in prediction_paths:
+            with path.open(encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    if row.get("task_order") != SCIQ_TASK_ORDER:
+                        raise ValueError(f"wrong task order at {path}:{line_number}")
+                    if row.get("task") != SCIQ_TASK_NAME:
+                        raise ValueError(f"wrong task name at {path}:{line_number}")
+                    key = json.dumps(
+                        row["example_id"],
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if key in seen:
+                        raise ValueError(f"duplicate SciQ example at {path}:{line_number}")
+                    seen.add(key)
+        prediction_count = len(seen)
+        if prediction_count != SCIQ_EXAMPLE_COUNT:
+            raise ValueError(f"SciQ prediction coverage is {prediction_count}/1000")
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        error = str(exc)
+    return {
+        "complete": not error,
+        "run_manifest": str(manifest_path) if manifest_path.is_file() else None,
+        "pool_summary": str(summary_path) if summary_path.is_file() else None,
+        "machine_result": str(machine_result_path) if machine_result_path.is_file() else None,
+        "prediction_files": [str(path) for path in prediction_paths],
+        "prediction_count": prediction_count,
+        "expected_prediction_count": SCIQ_EXAMPLE_COUNT,
+        "primary_score": score,
+        "error": error,
+    }
+
+
 def _artifact_status(benchmark: str, attempt: dict[str, Any]) -> dict[str, Any]:
     root = Path(str(attempt["attempt_root"]))
     if benchmark == "core88":
@@ -1529,6 +1873,8 @@ def _artifact_status(benchmark: str, attempt: dict[str, Any]) -> dict[str, Any]:
             "shards": [str(path) for path in shards],
             "coverage": coverage,
         }
+    if benchmark == "sciq":
+        return _sciq_artifacts(root)
     return _long_context_artifacts(root)
 
 
@@ -1733,6 +2079,25 @@ def _score_command(
             env["PYTHONPATH"] = f"{OLMO_EVAL_ROOT / 'src'}:{os.environ.get('PYTHONPATH', '')}"
         return CommandSpec(
             tuple(argv), env, Resources(gpus=0, cpus=8, memory_gib=32), output_dir, image
+        )
+    if benchmark == "sciq":
+        return CommandSpec(
+            (
+                PYTHON_BIN,
+                "-m",
+                "ncp_olmo_eval.portable_tasks",
+                "score-sciq",
+                "--data-root",
+                str(CORE_DATA_ROOT),
+                "--inference-root",
+                str(inference_root),
+                "--output-root",
+                str(score_root),
+            ),
+            env,
+            Resources(gpus=0, cpus=8, memory_gib=32),
+            score_root,
+            RUNTIME_IMAGE,
         )
     if benchmark == "ruler":
         assert data_root is not None
@@ -1993,17 +2358,53 @@ def _score_artifacts(benchmark: str, attempt: dict[str, Any]) -> dict[str, Any]:
         }
     score = root / "score.json"
     complete = False
+    error = ""
     if score.is_file():
         payload = _read_json(score)
-        complete = payload.get("status") in {
-            "UNIFIED_GSM8K_OFFICIAL_RESCORE_OK",
-            "LONG_CONTEXT_SCORE_OK",
-        }
-        if benchmark == "ruler":
+        expected_status = {
+            "gsm8k": "UNIFIED_GSM8K_OFFICIAL_RESCORE_OK",
+            "sciq": "CORE_NATIVE_FULL_OK",
+            "ruler": "LONG_CONTEXT_SCORE_OK",
+            "helmet": "LONG_CONTEXT_SCORE_OK",
+        }.get(benchmark)
+        complete = payload.get("status") == expected_status
+        if benchmark == "sciq":
+            tasks = payload.get("tasks")
+            task = tasks[0] if isinstance(tasks, list) and len(tasks) == 1 else None
+            try:
+                if payload.get("profile") != SCIQ_SOURCE_PROFILE:
+                    raise ValueError("SciQ score profile mismatch")
+                if payload.get("task_orders") != [SCIQ_TASK_ORDER]:
+                    raise ValueError("SciQ score task order mismatch")
+                if int(payload.get("expected_predictions", -1)) != SCIQ_EXAMPLE_COUNT:
+                    raise ValueError("SciQ score expected count mismatch")
+                if int(payload.get("observed_predictions", -1)) != SCIQ_EXAMPLE_COUNT:
+                    raise ValueError("SciQ score observed count mismatch")
+                if not isinstance(task, dict):
+                    raise ValueError("SciQ score must contain exactly one task")
+                if (
+                    task.get("task_order") != SCIQ_TASK_ORDER
+                    or task.get("task") != SCIQ_TASK_NAME
+                    or task.get("metric") != "acc"
+                    or task.get("request_type") != "loglikelihood"
+                    or task.get("score_status") != "SCORED"
+                ):
+                    raise ValueError("SciQ scored task contract mismatch")
+                primary_score = float(task["primary_score"])
+                if not math.isfinite(primary_score) or not 0.0 <= primary_score <= 1.0:
+                    raise ValueError("SciQ score is not a finite accuracy")
+                if not (root / "sciq-score.csv").is_file() or not (
+                    root / "_SUCCESS"
+                ).is_file():
+                    raise ValueError("SciQ score CSV/_SUCCESS is missing")
+            except (KeyError, TypeError, ValueError) as exc:
+                complete = False
+                error = str(exc)
+        elif benchmark == "ruler":
             complete = complete and payload.get("official_protocol_compatible") is True
         elif benchmark == "helmet":
             complete = complete and payload.get("all_length_primary_scores_complete") is True
-    return {"complete": complete, "score_json": str(score)}
+    return {"complete": complete, "score_json": str(score), "error": error}
 
 
 def submit_final(

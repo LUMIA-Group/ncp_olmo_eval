@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0a11
+
+- Add standalone SciQ inference, scoring, status validation, and final result
+  materialization to the scheduler-neutral unified entry.
+- Seal SciQ to the OLMo `all_supported_local` task 348 export: 1,000 test
+  examples, four continuation likelihoods, zero-shot `Question:/Answer:`
+  prompts, seed 42, one eight-GPU vLLM job, and official raw `acc`.
+- Normalize OLMo's ordered metric definitions without losing their source
+  evidence, selecting raw `acc` ahead of `acc_norm` for SciQ.
+- Add subset-aware Core-native planning and aggregation while retaining strict
+  full-profile order checks, exact source SHA-256 validation, complete unique
+  prediction coverage, and CPU-only rescoring.
+
 ## 0.1.0a10
 
 - Separate the immutable evaluator identity recorded in a Core88 prediction-score
