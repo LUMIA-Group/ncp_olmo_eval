@@ -350,6 +350,26 @@ def _isolate_compile_caches(rank: int, world_size: int) -> dict[str, str]:
     return paths
 
 
+def _primary_metric(value: Any) -> str:
+    """Resolve OLMo's ordered metric list to this evaluator's primary metric."""
+
+    if isinstance(value, str):
+        metric_names = [value]
+    elif isinstance(value, dict):
+        metric_names = [str(value.get("metric", ""))]
+    elif isinstance(value, list):
+        metric_names = [
+            str(item.get("metric", "")) if isinstance(item, dict) else str(item)
+            for item in value
+        ]
+    else:
+        raise ValueError(f"invalid metric contract: {value!r}")
+    for metric in metric_names:
+        if metric in SUPPORTED_METRICS:
+            return metric
+    raise ValueError(f"no supported primary metric in contract: {metric_names}")
+
+
 def _load_manifest(
     data_root: Path, profile: str, task_orders: set[int]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -367,8 +387,18 @@ def _load_manifest(
     expected_orders = list(range(1, declared_task_count + 1))
     actual_orders = [int(task.get("task_order", -1)) for task in tasks]
     if actual_orders != expected_orders:
-        raise RuntimeError(f"{profile} task order is not the fixed 1..{declared_task_count} order")
-    selected = [task for task in tasks if not task_orders or int(task["task_order"]) in task_orders]
+        if not task_orders or sorted(actual_orders) != expected_orders:
+            raise RuntimeError(
+                f"{profile} task order is not the fixed 1..{declared_task_count} order"
+            )
+    selected = sorted(
+        (
+            task
+            for task in tasks
+            if not task_orders or int(task["task_order"]) in task_orders
+        ),
+        key=lambda task: int(task["task_order"]),
+    )
     if task_orders != {int(task["task_order"]) for task in selected} and task_orders:
         missing = sorted(task_orders - {int(task["task_order"]) for task in selected})
         raise ValueError(f"unknown task orders: {missing}")
@@ -385,9 +415,11 @@ def _load_manifest(
                 task["metric"] = first_record.get("metric")
             if task.get("request_type") is None:
                 task["request_type"] = first_record.get("request_type")
-        metric = task.get("metric")
-        if metric not in SUPPORTED_METRICS:
-            raise ValueError(f"unsupported Core metric {metric!r}: {task['task']}")
+        metric_contract = task.get("metric")
+        metric = _primary_metric(metric_contract)
+        if not isinstance(metric_contract, str):
+            task["metric_definitions"] = metric_contract
+        task["metric"] = metric
         normalized.append(task)
     return summary, normalized
 
@@ -396,7 +428,12 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
-            rows.append(json.loads(line))
+            row = json.loads(line)
+            metric_contract = row.get("metric")
+            if not isinstance(metric_contract, str):
+                row["metric_definitions"] = metric_contract
+            row["metric"] = _primary_metric(metric_contract)
+            rows.append(row)
     return rows
 
 

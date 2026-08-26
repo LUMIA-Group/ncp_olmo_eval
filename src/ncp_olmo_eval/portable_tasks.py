@@ -387,6 +387,60 @@ def run_core_final(args: argparse.Namespace) -> None:
     (output / "_SUCCESS").touch()
 
 
+def run_sciq_score(args: argparse.Namespace) -> None:
+    """Rescore one sealed SciQ run and materialize its raw-accuracy result."""
+
+    from .evaluation_cli import (
+        SCIQ_EXAMPLE_COUNT,
+        SCIQ_SOURCE_PROFILE,
+        SCIQ_TASK_NAME,
+        SCIQ_TASK_ORDER,
+    )
+
+    output = args.output_root.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    score_json = output / "score.json"
+    score_csv = output / "sciq-score.csv"
+    _run(
+        _module(
+            "ncp_olmo_eval.core_native_aggregate",
+            "--data-root",
+            args.data_root,
+            "--profile",
+            SCIQ_SOURCE_PROFILE,
+            "--task-orders",
+            SCIQ_TASK_ORDER,
+            "--input-root",
+            args.inference_root,
+            "--output-json",
+            score_json,
+            "--output-csv",
+            score_csv,
+        ),
+        log=output / "score.log",
+    )
+    payload = json.loads(score_json.read_text(encoding="utf-8"))
+    tasks = payload.get("tasks")
+    task = tasks[0] if isinstance(tasks, list) and len(tasks) == 1 else None
+    if (
+        payload.get("status") != "CORE_NATIVE_FULL_OK"
+        or payload.get("profile") != SCIQ_SOURCE_PROFILE
+        or payload.get("task_orders") != [SCIQ_TASK_ORDER]
+        or int(payload.get("expected_predictions", -1)) != SCIQ_EXAMPLE_COUNT
+        or int(payload.get("observed_predictions", -1)) != SCIQ_EXAMPLE_COUNT
+        or not isinstance(task, dict)
+        or task.get("task_order") != SCIQ_TASK_ORDER
+        or task.get("task") != SCIQ_TASK_NAME
+        or task.get("metric") != "acc"
+        or task.get("request_type") != "loglikelihood"
+        or task.get("score_status") != "SCORED"
+    ):
+        raise RuntimeError(f"SciQ score contract is incomplete: {payload}")
+    if not score_csv.is_file() or score_csv.stat().st_size == 0:
+        raise RuntimeError("SciQ scorer did not produce sciq-score.csv")
+    (output / "_SUCCESS").touch()
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="mode", required=True)
@@ -429,6 +483,12 @@ def _parser() -> argparse.ArgumentParser:
     long_context.add_argument("--flash-attn-version", type=int, choices=(2, 3), default=3)
     long_context.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     long_context.set_defaults(handler=run_long_context)
+
+    sciq_score = subparsers.add_parser("score-sciq")
+    sciq_score.add_argument("--data-root", type=Path, required=True)
+    sciq_score.add_argument("--inference-root", type=Path, required=True)
+    sciq_score.add_argument("--output-root", type=Path, required=True)
+    sciq_score.set_defaults(handler=run_sciq_score)
 
     final_core = subparsers.add_parser("final-core")
     final_core.add_argument("--data-root", type=Path, required=True)

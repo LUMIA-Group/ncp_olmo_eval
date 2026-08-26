@@ -22,6 +22,7 @@ from .core_native_eval import (
     _file_sha256,
     _generation_score,
     _pass_at_k,
+    _primary_metric,
     _stable_id,
     _task_is_generation,
     _task_sample_count,
@@ -62,6 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--profile", default="core88")
+    parser.add_argument(
+        "--task-orders",
+        default="",
+        help="Optional comma-separated subset of task orders from --profile.",
+    )
     parser.add_argument(
         "--input-root",
         type=Path,
@@ -169,7 +175,10 @@ def _prediction_files(root: Path) -> Iterable[Path]:
 
 
 def _load_gold(
-    data_root: Path, profile: str, summary: dict[str, Any] | None = None
+    data_root: Path,
+    profile: str,
+    summary: dict[str, Any] | None = None,
+    task_orders: set[int] | None = None,
 ) -> tuple[dict[tuple[int, str], dict[str, Any]], list[dict[str, Any]]]:
     if summary is None:
         summary = json.loads((data_root / "summary.json").read_text(encoding="utf-8"))
@@ -179,19 +188,51 @@ def _load_gold(
     tasks = section.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise RuntimeError(f"{profile} contains no tasks")
+    if task_orders:
+        selected = [task for task in tasks if int(task["task_order"]) in task_orders]
+        selected_orders = {int(task["task_order"]) for task in selected}
+        if selected_orders != task_orders:
+            raise RuntimeError(
+                f"{profile} does not contain requested task orders: "
+                f"{sorted(task_orders - selected_orders)}"
+            )
+        tasks = selected
     gold: dict[tuple[int, str], dict[str, Any]] = {}
-    for task in tasks:
+    normalized_tasks: list[dict[str, Any]] = []
+    for source_task in tasks:
+        task = dict(source_task)
         path = data_root / task["file"]
         if _file_sha256(path) != task["sha256"]:
             raise RuntimeError(f"dataset SHA256 mismatch: {path}")
+        first_row: dict[str, Any] | None = None
         with gzip.open(path, "rt", encoding="utf-8") as handle:
             for line in handle:
                 row = json.loads(line)
+                if first_row is None:
+                    first_row = row
+                metric_contract = row.get("metric")
+                if not isinstance(metric_contract, str):
+                    row["metric_definitions"] = metric_contract
+                row["metric"] = _primary_metric(metric_contract)
                 key = (int(row["task_order"]), _stable_id(row["example_id"]))
                 if key in gold:
                     raise RuntimeError(f"duplicate gold key: {key}")
                 gold[key] = row
-    return gold, tasks
+        if first_row is None:
+            raise RuntimeError(f"dataset is empty: {path}")
+        metric_contract = task.get("metric", first_row.get("metric"))
+        if not isinstance(metric_contract, str):
+            task["metric_definitions"] = metric_contract
+        task["metric"] = _primary_metric(metric_contract)
+        if (
+            task.get("metric_definitions") is None
+            and first_row.get("metric_definitions") is not None
+        ):
+            task["metric_definitions"] = first_row["metric_definitions"]
+        if task.get("request_type") is None:
+            task["request_type"] = first_row.get("request_type")
+        normalized_tasks.append(task)
+    return gold, normalized_tasks
 
 
 def _compatible_source_task_orders(
@@ -435,7 +476,14 @@ def main() -> None:
     data_root = args.data_root.resolve()
     data_summary_path = data_root / "summary.json"
     data_summary = json.loads(data_summary_path.read_text(encoding="utf-8"))
-    gold, source_tasks = _load_gold(data_root, args.profile, data_summary)
+    selected_task_orders = {
+        int(value.strip()) for value in args.task_orders.split(",") if value.strip()
+    }
+    if any(value <= 0 for value in selected_task_orders):
+        raise ValueError(f"task orders must be positive: {sorted(selected_task_orders)}")
+    gold, source_tasks = _load_gold(
+        data_root, args.profile, data_summary, selected_task_orders
+    )
     code_result_paths = _resolve_code_result_paths(args.code_results, args.code_results_dir)
     code_results = _load_code_results(code_result_paths)
     manifests = []
@@ -667,6 +715,7 @@ def main() -> None:
         "runtime_hf_model_paths": sorted(runtime_model_paths),
         "data_root": str(data_root),
         "profile": args.profile,
+        "task_orders": [int(task["task_order"]) for task in source_tasks],
         "source_profiles": sorted(source_profiles),
         "data_summary_sha256": _file_sha256(data_summary_path),
         "input_roots": [str(path.resolve()) for path in args.input_root],

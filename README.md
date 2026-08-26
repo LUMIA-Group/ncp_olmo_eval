@@ -3,7 +3,7 @@
 `ncp_olmo_eval` is a scheduler-neutral, vLLM-only evaluation workflow for
 stock OLMo and NCP OLMo checkpoints. One CLI handles immutable model
 registration, inference plans, scoring plans, status validation, and final
-results for GSM8K, Core88, RULER, and HELMET.
+results for GSM8K, SciQ, Core88, RULER, and HELMET.
 
 The repository contains no cluster endpoint, private mount, registry, proxy,
 account, credential, or checkpoint default. It emits ordinary JSON task specs;
@@ -15,6 +15,7 @@ adapter.
 | Benchmark | Fixed contract | Portable task plan | Result |
 |---|---|---:|---|
 | GSM8K | standard fixed 8-shot prompt, seed 42, batch 8, one sample | 1 x 8 GPU | aligned score |
+| SciQ | official zero-shot four-choice likelihood, seed 42, batch 8, raw acc | 1 x 8 GPU | aligned raw accuracy |
 | Core88 | seed 42, batch 8, official per-task samples, context 8192 | 4 x 8 GPU plus GSM8K | 88/30-column CSV |
 | RULER | fixed OLMES data, 4K/8K/16K/32K/64K, seed 42, batch 4 | 1 x 8 GPU | task/length scores |
 | HELMET | pinned official profile, 8K/16K/32K/64K, seed 42, batch 4 | 1 x 8 GPU | family/length scores |
@@ -87,6 +88,10 @@ ncp-olmo-eval --root /shared/evaluations infer \
 # Inspect task and artifact state.
 ncp-olmo-eval --root /shared/evaluations status \
   --evaluation vllm-abc123-v1 --benchmark core88
+
+# SciQ follows the same infer -> score -> final lifecycle.
+ncp-olmo-eval --root /shared/evaluations infer \
+  --evaluation vllm-abc123-v1 --benchmark sciq --executor emit
 ```
 
 The command returns the exact `task_plan`. Run that plan in one of three ways:

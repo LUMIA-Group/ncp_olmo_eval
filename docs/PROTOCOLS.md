@@ -1,7 +1,7 @@
 # Evaluation protocols
 
 This document describes the benchmark protocol introduced by `v0.1.0a1` and
-retained by the scheduler-neutral `v0.1.0a10` work. Result metadata is
+retained by the scheduler-neutral `v0.1.0a11` work. Result metadata is
 authoritative when it is more specific than this overview.
 
 ## Common contract
@@ -30,6 +30,24 @@ protocol-defined sample count; it does not mean zero samples.
 Scoring separates answer matching from sandboxed execution. MultiPL-E uses 32
 shards; Python, BigCodeBench, and DS-1000 use eight shards each. Finalization
 emits the full 88-column CSV and the fixed 30-column summary.
+
+## SciQ
+
+- Source profile/task: `all_supported_local`, task order 348,
+  `olmo_eval_sciq`.
+- Source file: `all_supported_local/348_olmo_eval_sciq.jsonl.gz`, SHA-256
+  `b0bf31832d352e29b846f0e05893b1ffcef9d7ba2d4c350fdb36fad1f9fa0db3`.
+- Test set: exactly 1,000 unique examples; zero-shot official
+  `Question:/Answer:` prompt and four continuation candidates.
+- Inference: `loglikelihood`, batch size 8, one eight-GPU vLLM job, seed 42,
+  no generation sampling.
+- Metric: official raw `acc`. The ordered upstream metric contract is retained
+  as evidence, but `acc_norm` is never substituted as the primary score.
+- Scoring: a CPU task reopens sealed gold and prediction artifacts, checks full
+  coverage and hashes, and emits `score.json` plus `sciq-score.csv`.
+
+SciQ remains a standalone benchmark. It does not change Core88's 88 tasks and
+does not silently populate the optional SciQ column in a Core88 30-column table.
 
 ## RULER
 
