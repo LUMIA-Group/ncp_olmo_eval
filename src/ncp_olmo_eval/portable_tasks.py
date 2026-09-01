@@ -52,6 +52,10 @@ def _module(name: str, *args: object) -> list[str]:
 def run_gsm8k(args: argparse.Namespace) -> None:
     if args.fewshot_seed != 42 or args.sampling_seed != 42:
         raise ValueError("GSM8K fixes both seeds to 42")
+    if args.batch_size <= 0:
+        raise ValueError("GSM8K batch size must be positive")
+    if args.speculative_draft_model and args.model_family != "conceptlm":
+        raise ValueError("NCP DFlash requires model-family=conceptlm")
     output = args.output_root.resolve()
     output.mkdir(parents=True, exist_ok=True)
     overlay = output / "model"
@@ -125,11 +129,9 @@ def run_gsm8k(args: argparse.Namespace) -> None:
                 "PYTHONHASHSEED": "42",
             }
         )
-        commands.append(
-            (
-                _module(
-                    "ncp_olmo_eval.vllm_plugin.gsm8k",
-                    "generate",
+        generate_argv = _module(
+            "ncp_olmo_eval.vllm_plugin.gsm8k",
+            "generate",
                     "--input-dir",
                     inputs,
                     "--output-dir",
@@ -147,7 +149,7 @@ def run_gsm8k(args: argparse.Namespace) -> None:
                     "--samples-per-doc",
                     1,
                     "--batch-size",
-                    8,
+                    args.batch_size,
                     "--max-model-len",
                     2048,
                     "--warmup-tokens",
@@ -162,9 +164,25 @@ def run_gsm8k(args: argparse.Namespace) -> None:
                     args.attention_backend,
                     "--flash-attn-version",
                     args.flash_attn_version,
-                    "--hlm-attention-impl",
-                    args.hlm_attention_impl,
-                ),
+            "--hlm-attention-impl",
+            args.hlm_attention_impl,
+        )
+        if args.speculative_draft_model:
+            generate_argv.extend(
+                [
+                    "--speculative-draft-model",
+                    str(args.speculative_draft_model),
+                    "--speculative-num-tokens",
+                    str(args.speculative_num_tokens),
+                    "--speculative-verification-mode",
+                    args.speculative_verification_mode,
+                    "--speculative-telemetry-path",
+                    str(shard / "ncp-dflash-telemetry.jsonl"),
+                ]
+            )
+        commands.append(
+            (
+                generate_argv,
                 env,
                 output / f"rank-{rank}.log",
             )
@@ -183,7 +201,7 @@ def run_gsm8k(args: argparse.Namespace) -> None:
             "--samples-per-doc",
             1,
             "--batch-size",
-            8,
+            args.batch_size,
             "--model-family",
             args.model_family,
             "--standard-input-config",
@@ -455,11 +473,25 @@ def _parser() -> argparse.ArgumentParser:
     gsm.add_argument("--gpus", type=int, default=8)
     gsm.add_argument("--fewshot-seed", type=int, default=42)
     gsm.add_argument("--sampling-seed", type=int, default=42)
+    gsm.add_argument("--batch-size", type=int, default=8)
     gsm.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     gsm.add_argument("--execution-mode", choices=("eager", "piecewise"), default="eager")
     gsm.add_argument("--attention-backend", default="FLASH_ATTN")
     gsm.add_argument("--flash-attn-version", type=int, choices=(2, 3), default=3)
     gsm.add_argument("--hlm-attention-impl", default="legacy_mixed")
+    gsm.add_argument("--speculative-draft-model", type=Path)
+    gsm.add_argument("--speculative-num-tokens", type=int, default=16)
+    gsm.add_argument(
+        "--speculative-verification-mode",
+        choices=(
+            "sequential_exact",
+            "intra_chunk_exact",
+            "segmented_kv_approx",
+            "transactional_exact",
+            "chunk_parallel",
+        ),
+        default="sequential_exact",
+    )
     gsm.add_argument("--workflow-manifest", type=Path)
     gsm.add_argument("--repo-commit", default="")
     gsm.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)

@@ -17,6 +17,7 @@ class SamplingParams:
     seed: int | None = None
     logprobs: int = 0
     sample_in_vocab_order: bool = False
+    ignore_eos: bool = False
 
 
 @dataclass

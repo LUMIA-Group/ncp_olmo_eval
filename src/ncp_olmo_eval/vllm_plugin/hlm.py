@@ -9,7 +9,13 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from vllm.attention.utils.fa_utils import get_flash_attn_version
+try:
+    # vLLM 0.13 public path used by the released ConceptLM backend.
+    from vllm.attention.utils.fa_utils import get_flash_attn_version
+except ModuleNotFoundError:
+    # Keep ordinary backend imports tolerant of newer vLLM layouts. NCP
+    # DFlash itself is separately and strictly pinned to vLLM 0.13.0.
+    from vllm.v1.attention.backends.fa_utils import get_flash_attn_version
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import QKVParallelLinear, RowParallelLinear

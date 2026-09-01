@@ -48,6 +48,7 @@ from .native_vllm_inference import (
     NATIVE_VLLM_BACKEND,
     NativeVLLMInferencer,
     add_native_vllm_args,
+    native_vllm_speculative_kwargs,
     prepare_native_vllm_model,
     validate_native_vllm_args,
 )
@@ -337,6 +338,7 @@ def _build_inferencer(
             runtime_config=args.vllm_runtime_config or None,
             overlay_dir=overlay_dir,
             model_family=args.vllm_model_family,
+            **native_vllm_speculative_kwargs(args),
         )
         inferencer = NativeVLLMInferencer(
             model_path=runtime_model,

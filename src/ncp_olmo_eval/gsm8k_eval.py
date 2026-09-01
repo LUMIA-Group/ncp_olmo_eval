@@ -31,6 +31,7 @@ from .native_vllm_inference import (
     NativeVLLMInferencer,
     add_native_vllm_args,
     native_vllm_max_model_len,
+    native_vllm_speculative_kwargs,
     prepare_native_vllm_model,
     validate_native_vllm_args,
 )
@@ -640,6 +641,9 @@ def main() -> None:
             attention_backend=args.vllm_attention_backend,
             flash_attn_version=args.vllm_flash_attn_version,
             hlm_attention_impl=args.vllm_hlm_attention_impl,
+            model_family=args.vllm_model_family,
+            max_batch_size=args.batch_size,
+            **native_vllm_speculative_kwargs(args),
         )
         inferencer: Any = native_inferencer
     elif args.hf_backend == LMDEPLOY_BACKEND:

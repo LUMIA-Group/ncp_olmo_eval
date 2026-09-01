@@ -1,9 +1,10 @@
 """Adapter from the local evaluation interface to native ConceptLM vLLM.
 
-The native backend remains an explicitly selected experimental path.  It owns
-one vLLM engine per visible GPU and keeps prefix caching and speculative
-decoding disabled.  Evaluation batches retain a stable seed per request so
-their sampling contract does not depend on the coordinator's batch shape.
+The native backend remains an explicitly selected experimental path. It owns
+one vLLM engine per visible GPU and keeps prefix caching disabled. Evaluation
+batches retain a stable seed per request so their sampling contract does not
+depend on the coordinator's batch shape. NCP DFlash is an additional explicit
+opt-in whose target-state rollback and token parity are validated separately.
 """
 
 from __future__ import annotations
@@ -21,6 +22,25 @@ from .inference import SamplingParams, TextCompletion
 
 NATIVE_VLLM_BACKEND = "native_vllm"
 NATIVE_VLLM_OVERLAY_MANIFEST = "native_vllm_overlay_manifest.json"
+NCP_DFLASH_VLLM_VERSION = "0.13.0"
+NCP_DFLASH_VERIFICATION_MODES = ("sequential_exact", "intra_chunk_exact", "segmented_kv_approx")
+NCP_DFLASH_EXACT_VERIFICATION_MODES = ("sequential_exact", "intra_chunk_exact")
+NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES = ("segmented_kv_approx",)
+NCP_DFLASH_VERIFICATION_MODE_ALIASES = {
+    "chunk_parallel": "intra_chunk_exact",
+    # This development-only name predated strict token A/B and claimed an
+    # exactness property that the implementation does not have. Retain it only
+    # as an input alias; manifests always record the canonical approximate name.
+    "transactional_exact": "segmented_kv_approx",
+}
+NCP_DFLASH_VERIFICATION_MODE_INPUTS = (
+    *NCP_DFLASH_VERIFICATION_MODES,
+    *NCP_DFLASH_VERIFICATION_MODE_ALIASES,
+)
+
+
+def normalize_ncp_dflash_verification_mode(value: str) -> str:
+    return NCP_DFLASH_VERIFICATION_MODE_ALIASES.get(str(value), str(value))
 
 
 def add_native_vllm_args(parser: argparse.ArgumentParser) -> None:
@@ -40,6 +60,15 @@ def add_native_vllm_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=0,
         help="Native vLLM maximum sequence length; 0 uses seq_length + 2.",
+    )
+    parser.add_argument(
+        "--vllm-scheduler-queue-size",
+        type=int,
+        default=0,
+        help=(
+            "Requests dispatched to one native-vLLM generate call; zero uses "
+            "the active batch size. Values above max_num_seqs enable continuous refill."
+        ),
     )
     parser.add_argument(
         "--vllm-runtime-config",
@@ -82,6 +111,40 @@ def add_native_vllm_args(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Number of GPUs owned by each native-vLLM engine.",
     )
+    parser.add_argument(
+        "--vllm-speculative-draft-model",
+        default="",
+        help=(
+            "Optional NCP DFlash checkpoint for ConceptLM speculative decoding. "
+            "This correctness-gated path is pinned to vLLM 0.13.0."
+        ),
+    )
+    parser.add_argument(
+        "--vllm-speculative-num-tokens",
+        type=int,
+        default=16,
+        help="Maximum NCP DFlash proposal length per verification round.",
+    )
+    parser.add_argument(
+        "--vllm-speculative-telemetry-path",
+        default="",
+        help="Optional append-only JSONL path for proposer and rollback telemetry.",
+    )
+    parser.add_argument(
+        "--vllm-speculative-verification-mode",
+        choices=NCP_DFLASH_VERIFICATION_MODE_INPUTS,
+        default="sequential_exact",
+        help=(
+            "sequential_exact proposes at most one token and is the mandatory "
+            "correctness baseline; intra_chunk_exact batches only proposals "
+            "that remain inside the current HLM chunk; segmented_kv_approx "
+            "keeps the multi-token target transaction, commits the accepted "
+            "prefix, and rolls back the rejected suffix. The approximate mode "
+            "may change target tokens and must use isolated downstream A/B "
+            "evaluation. chunk_parallel and transactional_exact are legacy "
+            "input aliases."
+        ),
+    )
 
 
 def validate_native_vllm_args(
@@ -105,6 +168,11 @@ def validate_native_vllm_args(
         raise ValueError("native_vllm requires exactly one engine process per GPU")
     if int(getattr(args, "vllm_max_model_len", 0)) < 0:
         raise ValueError("vllm_max_model_len must be non-negative")
+    queue_size = int(getattr(args, "vllm_scheduler_queue_size", 0))
+    if queue_size < 0:
+        raise ValueError("vllm_scheduler_queue_size must be non-negative")
+    if queue_size and queue_size < int(batch_size):
+        raise ValueError("vllm_scheduler_queue_size must be at least the active batch size")
     if int(getattr(args, "vllm_tensor_parallel_size", 1)) <= 0:
         raise ValueError("vllm_tensor_parallel_size must be positive")
     runtime_config = str(getattr(args, "vllm_runtime_config", ""))
@@ -116,6 +184,28 @@ def validate_native_vllm_args(
     utilization = float(getattr(args, "vllm_gpu_memory_utilization", 0.85))
     if not 0.0 < utilization < 1.0:
         raise ValueError("vllm_gpu_memory_utilization must be in (0, 1)")
+    draft_model = str(getattr(args, "vllm_speculative_draft_model", ""))
+    if draft_model:
+        if model_family != "conceptlm":
+            raise ValueError("NCP DFlash requires --vllm-model-family=conceptlm")
+        draft_path = Path(draft_model)
+        if not draft_path.is_dir():
+            raise ValueError(f"NCP DFlash checkpoint does not exist: {draft_path}")
+        for required_name in ("config.json", "model.safetensors"):
+            if not (draft_path / required_name).is_file():
+                raise ValueError(f"NCP DFlash checkpoint is missing {required_name}: {draft_path}")
+        proposal_count = int(getattr(args, "vllm_speculative_num_tokens", 16))
+        if not 0 < proposal_count <= 16:
+            raise ValueError("vllm_speculative_num_tokens must be in [1, 16]")
+        verification_mode = normalize_ncp_dflash_verification_mode(
+            getattr(args, "vllm_speculative_verification_mode", "sequential_exact")
+        )
+        if verification_mode not in NCP_DFLASH_VERIFICATION_MODES:
+            raise ValueError(
+                "vllm_speculative_verification_mode must be sequential_exact "
+                "intra_chunk_exact, or segmented_kv_approx"
+            )
+        args.vllm_speculative_verification_mode = verification_mode
 
 
 def native_vllm_max_model_len(args: argparse.Namespace) -> int:
@@ -123,6 +213,72 @@ def native_vllm_max_model_len(args: argparse.Namespace) -> int:
 
     configured = int(getattr(args, "vllm_max_model_len", 0))
     return configured if configured > 0 else int(args.seq_length) + 2
+
+
+def native_vllm_scheduler_queue_size(args: argparse.Namespace, active_batch_size: int) -> int:
+    """Resolve pending-request capacity independently from ``max_num_seqs``."""
+
+    configured = int(getattr(args, "vllm_scheduler_queue_size", 0))
+    return configured if configured > 0 else int(active_batch_size)
+
+
+def native_vllm_speculative_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    """Return the optional DFlash constructor contract from shared CLI args."""
+
+    return {
+        "speculative_draft_model": (str(getattr(args, "vllm_speculative_draft_model", "")) or None),
+        "speculative_num_tokens": int(getattr(args, "vllm_speculative_num_tokens", 16)),
+        "speculative_telemetry_path": (
+            str(getattr(args, "vllm_speculative_telemetry_path", "")) or None
+        ),
+        "speculative_verification_mode": normalize_ncp_dflash_verification_mode(
+            str(getattr(args, "vllm_speculative_verification_mode", "sequential_exact"))
+        ),
+    }
+
+
+def native_vllm_speculative_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    """Return a sealed DFlash identity for evaluator run manifests."""
+
+    runtime = native_vllm_speculative_kwargs(args)
+    draft_value = runtime["speculative_draft_model"]
+    if not draft_value:
+        return {
+            "speculative_decoding": False,
+            "speculative_method": "disabled",
+            "speculative_draft_model": None,
+            "speculative_draft_identity": None,
+            "speculative_num_tokens": 0,
+            "speculative_verification_mode": "not_applicable",
+            "speculative_output_contract": "not_applicable",
+            "speculative_correctness_gate": "not_applicable",
+        }
+
+    draft_root = Path(str(draft_value)).resolve()
+    draft_config = draft_root / "config.json"
+    draft_weights = draft_root / "model.safetensors"
+    weights_stat = draft_weights.stat()
+    verification_mode = str(runtime["speculative_verification_mode"])
+    exact_mode = verification_mode in NCP_DFLASH_EXACT_VERIFICATION_MODES
+    return {
+        "speculative_decoding": True,
+        "speculative_method": "ncp_dflash_vllm_0_13",
+        "speculative_draft_model": str(draft_root),
+        "speculative_draft_identity": {
+            "path": str(draft_root),
+            "config_sha256": _file_sha256(draft_config),
+            "weights_size": weights_stat.st_size,
+            "weights_mtime_ns": weights_stat.st_mtime_ns,
+        },
+        "speculative_num_tokens": int(runtime["speculative_num_tokens"]),
+        "speculative_verification_mode": verification_mode,
+        "speculative_output_contract": "target_exact" if exact_mode else "approximate",
+        "speculative_correctness_gate": (
+            "exact_greedy_token_match_required"
+            if exact_mode
+            else "matched_downstream_score_ab_required"
+        ),
+    }
 
 
 def _make_backend_importable() -> None:
@@ -331,6 +487,7 @@ class NativeVLLMInferencer:
         max_model_len: int,
         seed: int,
         max_batch_size: int = 1,
+        scheduler_queue_size: int | None = None,
         gpu_memory_utilization: float = 0.85,
         execution_mode: str = "eager",
         attention_backend: str = "FLASH_ATTN",
@@ -338,6 +495,10 @@ class NativeVLLMInferencer:
         hlm_attention_impl: str = "legacy_mixed",
         tensor_parallel_size: int = 1,
         model_family: str = "conceptlm",
+        speculative_draft_model: str | Path | None = None,
+        speculative_num_tokens: int = 16,
+        speculative_telemetry_path: str | Path | None = None,
+        speculative_verification_mode: str = "sequential_exact",
         engine: Any | None = None,
         sampling_params_factory: Callable[..., Any] | None = None,
     ) -> None:
@@ -345,15 +506,29 @@ class NativeVLLMInferencer:
             raise ValueError("max_model_len must be positive")
         if not 1 <= int(max_batch_size) <= 8:
             raise ValueError("max_batch_size must be in [1, 8]")
+        if scheduler_queue_size is None:
+            scheduler_queue_size = int(max_batch_size)
+        if int(scheduler_queue_size) < int(max_batch_size):
+            raise ValueError("scheduler_queue_size must be at least max_batch_size")
         if execution_mode not in ("eager", "piecewise"):
             raise ValueError(f"unsupported vLLM execution mode: {execution_mode}")
         if int(tensor_parallel_size) <= 0:
             raise ValueError("tensor_parallel_size must be positive")
         if model_family not in ("conceptlm", "auto"):
             raise ValueError(f"unsupported vLLM model family: {model_family}")
+        if not 0 < int(speculative_num_tokens) <= 16:
+            raise ValueError("speculative_num_tokens must be in [1, 16]")
+        speculative_verification_mode = normalize_ncp_dflash_verification_mode(
+            speculative_verification_mode
+        )
+        if speculative_verification_mode not in NCP_DFLASH_VERIFICATION_MODES:
+            raise ValueError(
+                "unsupported DFlash verification mode: " f"{speculative_verification_mode}"
+            )
         self.model_path = str(Path(model_path).resolve())
         self.max_model_len = int(max_model_len)
         self.max_batch_size = int(max_batch_size)
+        self.scheduler_queue_size = int(scheduler_queue_size)
         self.seed = int(seed)
         self.execution_mode = execution_mode
         self.attention_backend = str(attention_backend)
@@ -362,10 +537,63 @@ class NativeVLLMInferencer:
         self.tensor_parallel_size = int(tensor_parallel_size)
         self.model_family = str(model_family)
         self.gpu_memory_utilization = float(gpu_memory_utilization)
+        self.speculative_draft_model = (
+            str(Path(speculative_draft_model).resolve()) if speculative_draft_model else ""
+        )
+        self.speculative_num_tokens = int(speculative_num_tokens)
+        self.speculative_verification_mode = str(speculative_verification_mode)
+        self.speculative_telemetry_path = (
+            str(Path(speculative_telemetry_path).resolve()) if speculative_telemetry_path else ""
+        )
+        self._draft_config: dict[str, Any] | None = None
+        if self.speculative_draft_model:
+            if self.model_family != "conceptlm":
+                raise ValueError("NCP DFlash requires model_family='conceptlm'")
+            draft_root = Path(self.speculative_draft_model)
+            draft_config_path = draft_root / "config.json"
+            draft_weights_path = draft_root / "model.safetensors"
+            if not draft_config_path.is_file() or not draft_weights_path.is_file():
+                raise FileNotFoundError(
+                    "NCP DFlash requires config.json and model.safetensors: " f"{draft_root}"
+                )
+            draft_config = json.loads(draft_config_path.read_text(encoding="utf-8"))
+            required_contract = {
+                "model_type": "conceptlm_dflash",
+                "proposal_method": "path_selector",
+                "hlm_conditioning": "causal_residual",
+                "concept_chunk_size": 4,
+            }
+            mismatched = {
+                key: (draft_config.get(key), expected)
+                for key, expected in required_contract.items()
+                if draft_config.get(key) != expected
+            }
+            target_layers = tuple(int(value) for value in draft_config.get("target_layer_ids", []))
+            if mismatched or target_layers != (1, 4, 7, 10, 13):
+                raise ValueError(
+                    "unsupported NCP DFlash checkpoint contract: "
+                    f"mismatched={mismatched} target_layer_ids={target_layers}"
+                )
+            block_size = int(draft_config.get("block_size", 0))
+            if self.speculative_num_tokens > block_size:
+                raise ValueError(
+                    "speculative_num_tokens exceeds the trained DFlash block: "
+                    f"{self.speculative_num_tokens} > {block_size}"
+                )
+            self._draft_config = draft_config
 
         if engine is None:
             from vllm import LLM
             from vllm import SamplingParams as VLLMSamplingParams
+
+            if self.speculative_draft_model:
+                import vllm
+
+                if vllm.__version__ != NCP_DFLASH_VLLM_VERSION:
+                    raise RuntimeError(
+                        "NCP DFlash requires vLLM "
+                        f"{NCP_DFLASH_VLLM_VERSION}, got {vllm.__version__}"
+                    )
 
             if self.model_family == "conceptlm":
                 _make_backend_importable()
@@ -373,6 +601,23 @@ class NativeVLLMInferencer:
 
                 os.environ["CONCEPTLM_VLLM_ENABLE_UNVERIFIED"] = "1"
                 os.environ["CONCEPTLM_HLM_ATTENTION_IMPL"] = self.hlm_attention_impl
+                if self.speculative_draft_model:
+                    os.environ["CONCEPTLM_VLLM_ENABLE_NCP_DFLASH"] = "1"
+                    os.environ["CONCEPTLM_DFLASH_CHECKPOINT"] = self.speculative_draft_model
+                    os.environ["CONCEPTLM_DFLASH_TARGET_LAYERS"] = ",".join(
+                        str(value) for value in self._draft_config["target_layer_ids"]
+                    )
+                    os.environ["CONCEPTLM_DFLASH_CHUNK_SIZE"] = str(
+                        self._draft_config["concept_chunk_size"]
+                    )
+                    os.environ["CONCEPTLM_DFLASH_MAX_MODEL_LEN"] = str(self.max_model_len)
+                    os.environ["CONCEPTLM_DFLASH_VERIFICATION_MODE"] = (
+                        self.speculative_verification_mode
+                    )
+                    if self.speculative_telemetry_path:
+                        os.environ["CONCEPTLM_DFLASH_TELEMETRY_PATH"] = (
+                            self.speculative_telemetry_path
+                        )
                 register()
             enforce_eager = execution_mode == "eager"
             compilation_config = (
@@ -402,6 +647,16 @@ class NativeVLLMInferencer:
                     trust_remote_code=True,
                     worker_cls="ncp_olmo_eval.vllm_plugin.worker.ConceptLMGPUWorker",
                 )
+            if self.speculative_draft_model:
+                engine_kwargs["speculative_config"] = {
+                    # vLLM 0.13 has no public custom proposer. The pinned
+                    # ConceptLM worker replaces this ngram placeholder with the
+                    # out-of-tree NCP DFlash runner before model loading.
+                    "method": "ngram",
+                    "num_speculative_tokens": self.speculative_num_tokens,
+                    "prompt_lookup_min": 1,
+                    "prompt_lookup_max": 1,
+                }
             engine = LLM(**engine_kwargs)
             sampling_params_factory = VLLMSamplingParams
         elif sampling_params_factory is None:
@@ -418,11 +673,114 @@ class NativeVLLMInferencer:
             "experimental": True,
             "max_model_len": self.max_model_len,
             "max_num_seqs": self.max_batch_size,
+            "scheduler_queue_size": self.scheduler_queue_size,
+            "continuous_batching_enabled": (
+                self.scheduler_queue_size > self.max_batch_size
+            ),
+            "continuous_batching_status": "experimental_request_local_state",
+            "draft_kv_cache_manager": (
+                "proposer_private_request_local"
+                if self.speculative_draft_model
+                else "not_applicable"
+            ),
             "tensor_parallel_size": self.tensor_parallel_size,
             "pipeline_parallel_size": 1,
             "execution_mode": self.execution_mode,
             "prefix_caching": False,
-            "speculative_decoding": False,
+            "speculative_decoding": bool(self.speculative_draft_model),
+            "speculative_method": (
+                "ncp_dflash_vllm_0_13" if self.speculative_draft_model else "disabled"
+            ),
+            "speculative_verification_mode": (
+                self.speculative_verification_mode
+                if self.speculative_draft_model
+                else "not_applicable"
+            ),
+            "speculative_vllm_version": (
+                NCP_DFLASH_VLLM_VERSION if self.speculative_draft_model else "not_applicable"
+            ),
+            "speculative_draft_model": self.speculative_draft_model,
+            "speculative_num_tokens": (
+                self.speculative_num_tokens if self.speculative_draft_model else 0
+            ),
+            "speculative_draft_attention_backend": (
+                os.environ.get("CONCEPTLM_DFLASH_ATTENTION_BACKEND", "sdpa")
+                if self.speculative_draft_model
+                else "disabled"
+            ),
+            "speculative_context_kv_cache": (
+                os.environ.get("CONCEPTLM_DFLASH_CONTEXT_KV_CACHE", "0") == "1"
+                if self.speculative_draft_model
+                else False
+            ),
+            "speculative_sparse_context_projection": (
+                os.environ.get("CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION", "0") == "1"
+                if self.speculative_draft_model
+                else False
+            ),
+            "speculative_min_eligible_batch": (
+                int(os.environ.get("CONCEPTLM_DFLASH_MIN_ELIGIBLE_BATCH", "1"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_min_proposal_tokens_per_row": (
+                int(os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW", "1"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_min_proposal_tokens_per_batch": (
+                int(os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH", "1"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_runtime_block_size": (
+                int(os.environ.get("CONCEPTLM_DFLASH_RUNTIME_BLOCK_SIZE", "0"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_active_batch_widths": (
+                os.environ.get("CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS", "")
+                if self.speculative_draft_model
+                else ""
+            ),
+            "speculative_dynamic_runtime_block_size": (
+                os.environ.get("CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE", "0") == "1"
+                if self.speculative_draft_model
+                else False
+            ),
+            "speculative_runtime_layer_count": (
+                int(os.environ.get("CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT", "0"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_runtime_local_mixer": (
+                os.environ.get("CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER", "full")
+                if self.speculative_draft_model
+                else "disabled"
+            ),
+            "speculative_mixer_compile_mode": (
+                os.environ.get("CONCEPTLM_DFLASH_MIXER_COMPILE_MODE", "default")
+                if self.speculative_draft_model
+                else "disabled"
+            ),
+            "speculative_output_contract": (
+                (
+                    "target_exact"
+                    if self.speculative_verification_mode in NCP_DFLASH_EXACT_VERIFICATION_MODES
+                    else "approximate"
+                )
+                if self.speculative_draft_model
+                else "not_applicable"
+            ),
+            "speculative_correctness_gate": (
+                (
+                    "exact_greedy_token_match_required"
+                    if self.speculative_verification_mode in NCP_DFLASH_EXACT_VERIFICATION_MODES
+                    else "matched_downstream_score_ab_required"
+                )
+                if self.speculative_draft_model
+                else "not_applicable"
+            ),
             "gpu_memory_utilization": self.gpu_memory_utilization,
             "attention_backend": self.attention_backend,
             "flash_attn_version": self.flash_attn_version,
@@ -437,7 +795,12 @@ class NativeVLLMInferencer:
     def generate_batch(
         self, prompts: list[str], samplings: list[SamplingParams]
     ) -> list[TextCompletion]:
-        """Generate a bounded batch with request-local sampling parameters."""
+        """Generate one bounded scheduler queue with request-local sampling.
+
+        ``max_batch_size`` is the engine's active ``max_num_seqs`` limit.  A
+        larger ``scheduler_queue_size`` deliberately gives vLLM pending work
+        so completed requests can be replaced without returning to Python.
+        """
 
         if not prompts:
             raise ValueError("prompt must not be empty")
@@ -445,10 +808,10 @@ class NativeVLLMInferencer:
             raise ValueError(
                 "native_vllm prompt/sampling batch mismatch: " f"{len(prompts)} != {len(samplings)}"
             )
-        if len(prompts) > self.max_batch_size:
+        if len(prompts) > self.scheduler_queue_size:
             raise ValueError(
-                "native_vllm batch exceeds max_batch_size: "
-                f"{len(prompts)} > {self.max_batch_size}"
+                "native_vllm request queue exceeds scheduler_queue_size: "
+                f"{len(prompts)} > {self.scheduler_queue_size}"
             )
         parameters: list[dict[str, Any]] = []
         for sampling in samplings:
@@ -457,7 +820,7 @@ class NativeVLLMInferencer:
                 "top_p": float(sampling.top_p),
                 "max_tokens": int(sampling.max_tokens),
                 "stop": list(sampling.stop),
-                "ignore_eos": False,
+                "ignore_eos": bool(sampling.ignore_eos),
                 "detokenize": True,
             }
             if sampling.seed is not None:
