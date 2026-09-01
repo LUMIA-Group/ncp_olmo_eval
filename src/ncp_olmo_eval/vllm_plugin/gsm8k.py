@@ -57,6 +57,12 @@ def parse_args() -> argparse.Namespace:
     generate.add_argument("--sampling-seed", type=int, default=42)
     generate.add_argument("--samples-per-doc", type=int, default=1)
     generate.add_argument("--batch-size", type=int, default=1)
+    generate.add_argument(
+        "--scheduler-queue-size",
+        type=int,
+        default=0,
+        help="requests submitted per generate call; zero uses batch-size",
+    )
     generate.add_argument("--max-model-len", type=int, default=2048)
     generate.add_argument("--warmup-tokens", type=int, default=2)
     generate.add_argument("--progress-every", type=int, default=10)
@@ -66,6 +72,25 @@ def parse_args() -> argparse.Namespace:
     generate.add_argument("--flash-attn-version", type=int, choices=(2, 3), default=3)
     generate.add_argument(
         "--hlm-attention-impl", choices=("legacy_mixed", "uniform_flash"), default="legacy_mixed"
+    )
+    generate.add_argument("--speculative-draft-model", type=Path)
+    generate.add_argument("--speculative-num-tokens", type=int, default=16)
+    generate.add_argument("--speculative-telemetry-path", type=Path)
+    generate.add_argument(
+        "--speculative-verification-mode",
+        choices=(
+            "sequential_exact",
+            "intra_chunk_exact",
+            "segmented_kv_approx",
+            "transactional_exact",
+            "chunk_parallel",
+        ),
+        default="sequential_exact",
+        help=(
+            "segmented_kv_approx rolls target state back after rejection and "
+            "may change target tokens; transactional_exact and chunk_parallel "
+            "are legacy input aliases"
+        ),
     )
 
     aggregate = subparsers.add_parser("aggregate")
@@ -311,7 +336,12 @@ def _model_fingerprint(model_dir: Path) -> dict[str, Any]:
             "size": stat.st_size,
             "mtime_ns": stat.st_mtime_ns,
         }
-        if name in ("config.json", "model.safetensors.index.json"):
+        if name in (
+            "config.json",
+            "model.safetensors.index.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+        ):
             row["sha256"] = _file_sha256(resolved)
         files.append(row)
     return {"model_dir": str(model_dir.resolve()), "files": files}
@@ -402,6 +432,17 @@ def generate(args: argparse.Namespace) -> None:
         raise ValueError("samples per doc must be positive")
     if args.batch_size <= 0:
         raise ValueError("batch size must be positive")
+    scheduler_queue_size = args.scheduler_queue_size or args.batch_size
+    if scheduler_queue_size < args.batch_size:
+        raise ValueError("scheduler queue size must be at least the active batch size")
+    if not 0 < args.speculative_num_tokens <= 16:
+        raise ValueError("speculative_num_tokens must be in [1, 16]")
+    verification_mode = {
+        "chunk_parallel": "intra_chunk_exact",
+        "transactional_exact": "segmented_kv_approx",
+    }.get(args.speculative_verification_mode, args.speculative_verification_mode)
+    if args.speculative_draft_model and args.model_family != "conceptlm":
+        raise ValueError("NCP DFlash requires model_family=conceptlm")
     input_manifest, input_rows = _load_and_validate_prepared_inputs(args.input_dir)
     if int(input_manifest.get("fewshot_seed", -1)) != EVALUATION_SEED:
         raise ValueError(
@@ -421,11 +462,31 @@ def generate(args: argparse.Namespace) -> None:
     from vllm import LLM, SamplingParams
     from vllm import __version__ as vllm_version
 
+    if args.speculative_draft_model and vllm_version != "0.13.0":
+        raise RuntimeError(f"NCP DFlash requires vLLM 0.13.0, got {vllm_version}")
+
     if args.model_family == "conceptlm":
         from .plugin import register
 
         os.environ["CONCEPTLM_VLLM_ENABLE_UNVERIFIED"] = "1"
         os.environ["CONCEPTLM_HLM_ATTENTION_IMPL"] = args.hlm_attention_impl
+        if args.speculative_draft_model:
+            draft_root = args.speculative_draft_model.resolve()
+            draft_config = _read_json(draft_root / "config.json")
+            if not (draft_root / "model.safetensors").is_file():
+                raise FileNotFoundError(f"NCP DFlash model.safetensors is missing: {draft_root}")
+            os.environ["CONCEPTLM_VLLM_ENABLE_NCP_DFLASH"] = "1"
+            os.environ["CONCEPTLM_DFLASH_CHECKPOINT"] = str(draft_root)
+            os.environ["CONCEPTLM_DFLASH_TARGET_LAYERS"] = ",".join(
+                str(value) for value in draft_config["target_layer_ids"]
+            )
+            os.environ["CONCEPTLM_DFLASH_CHUNK_SIZE"] = str(draft_config["concept_chunk_size"])
+            os.environ["CONCEPTLM_DFLASH_MAX_MODEL_LEN"] = str(args.max_model_len)
+            os.environ["CONCEPTLM_DFLASH_VERIFICATION_MODE"] = verification_mode
+            if args.speculative_telemetry_path:
+                os.environ["CONCEPTLM_DFLASH_TELEMETRY_PATH"] = str(
+                    args.speculative_telemetry_path.resolve()
+                )
         register()
     enforce_eager = args.execution_mode == "eager"
     compilation_config = (
@@ -454,6 +515,13 @@ def generate(args: argparse.Namespace) -> None:
         engine_kwargs.update(
             trust_remote_code=True, worker_cls="ncp_olmo_eval.vllm_plugin.worker.ConceptLMGPUWorker"
         )
+    if args.speculative_draft_model:
+        engine_kwargs["speculative_config"] = {
+            "method": "ngram",
+            "num_speculative_tokens": args.speculative_num_tokens,
+            "prompt_lookup_min": 1,
+            "prompt_lookup_max": 1,
+        }
     llm = LLM(**engine_kwargs)
     model_load_seconds = time.perf_counter() - load_started
     tokenizer = llm.get_tokenizer()
@@ -496,8 +564,8 @@ def generate(args: argparse.Namespace) -> None:
     evaluation_started_epoch = time.time()
     evaluation_started_at = _utc_now()
     with predictions_path.open("a", encoding="utf-8") as handle:
-        for batch_start in range(0, len(schedule), args.batch_size):
-            request_batch = schedule[batch_start : batch_start + args.batch_size]
+        for batch_start in range(0, len(schedule), scheduler_queue_size):
+            request_batch = schedule[batch_start : batch_start + scheduler_queue_size]
             rows = [input_rows[doc_index] for doc_index, _ in request_batch]
             request_seeds = [
                 _request_seed(args.sampling_seed, doc_index, sample_index)
@@ -596,6 +664,7 @@ def generate(args: argparse.Namespace) -> None:
         "dataset_sample_count": len(input_rows),
         "samples_per_doc": args.samples_per_doc,
         "batch_size": args.batch_size,
+        "scheduler_queue_size": scheduler_queue_size,
         "max_num_seqs": args.batch_size,
         "max_model_len": args.max_model_len,
         "sampling_seed": args.sampling_seed,
@@ -613,7 +682,81 @@ def generate(args: argparse.Namespace) -> None:
         "flash_attn_version": args.flash_attn_version,
         "hlm_attention_impl": args.hlm_attention_impl,
         "prefix_caching": False,
-        "speculative_decoding": False,
+        "speculative_decoding": bool(args.speculative_draft_model),
+        "speculative_method": (
+            "ncp_dflash_vllm_0_13" if args.speculative_draft_model else "disabled"
+        ),
+        "speculative_verification_mode": (
+            verification_mode if args.speculative_draft_model else "not_applicable"
+        ),
+        "speculative_output_contract": (
+            ("approximate" if verification_mode == "segmented_kv_approx" else "target_exact")
+            if args.speculative_draft_model
+            else "not_applicable"
+        ),
+        "speculative_num_tokens": (
+            args.speculative_num_tokens if args.speculative_draft_model else 0
+        ),
+        "speculative_draft_attention_backend": (
+            os.environ.get("CONCEPTLM_DFLASH_ATTENTION_BACKEND", "sdpa")
+            if args.speculative_draft_model
+            else "disabled"
+        ),
+        "speculative_context_kv_cache": (
+            os.environ.get("CONCEPTLM_DFLASH_CONTEXT_KV_CACHE", "0") == "1"
+            if args.speculative_draft_model
+            else False
+        ),
+        "speculative_sparse_context_projection": (
+            os.environ.get("CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION", "0") == "1"
+            if args.speculative_draft_model
+            else False
+        ),
+        "speculative_min_eligible_batch": (
+            int(os.environ.get("CONCEPTLM_DFLASH_MIN_ELIGIBLE_BATCH", "1"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_min_proposal_tokens_per_row": (
+            int(os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW", "1"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_min_proposal_tokens_per_batch": (
+            int(os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH", "1"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_runtime_block_size": (
+            int(os.environ.get("CONCEPTLM_DFLASH_RUNTIME_BLOCK_SIZE", "0"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_active_batch_widths": (
+            os.environ.get("CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS", "")
+            if args.speculative_draft_model
+            else ""
+        ),
+        "speculative_dynamic_runtime_block_size": (
+            os.environ.get("CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE", "0") == "1"
+            if args.speculative_draft_model
+            else False
+        ),
+        "speculative_runtime_layer_count": (
+            int(os.environ.get("CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT", "0"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_runtime_local_mixer": (
+            os.environ.get("CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER", "full")
+            if args.speculative_draft_model
+            else "disabled"
+        ),
+        "speculative_mixer_compile_mode": (
+            os.environ.get("CONCEPTLM_DFLASH_MIXER_COMPILE_MODE", "default")
+            if args.speculative_draft_model
+            else "disabled"
+        ),
         "cuda_graph_mode": "NONE" if enforce_eager else "PIECEWISE",
         "model_dir": str(args.model_dir.resolve()),
         "model_artifact": artifact_after,
@@ -655,6 +798,36 @@ def _require_consistent(results: list[dict[str, Any]], field: str) -> Any:
     if any(value != values[0] for value in values[1:]):
         raise ValueError(f"inconsistent shard field {field}: {values!r}")
     return values[0]
+
+
+def _model_artifact_identity(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Return the stable identity used when aggregating resumed shards.
+
+    Generated model overlays can be materialized again between an initial run
+    and a rank-level resume. Their mtimes then differ even though the resolved
+    source files and content are unchanged. Keep mtimes in the recorded
+    fingerprint for auditing, but exclude them from cross-shard identity.
+    """
+
+    return {
+        "model_dir": artifact["model_dir"],
+        "files": [
+            {
+                key: row[key]
+                for key in ("name", "resolved_path", "size", "sha256")
+                if key in row
+            }
+            for row in artifact["files"]
+        ],
+    }
+
+
+def _require_consistent_model_artifact(results: list[dict[str, Any]]) -> dict[str, Any]:
+    artifacts = [result["model_artifact"] for result in results]
+    identities = [_model_artifact_identity(artifact) for artifact in artifacts]
+    if any(identity != identities[0] for identity in identities[1:]):
+        raise ValueError(f"inconsistent shard field model_artifact: {identities!r}")
+    return artifacts[0]
 
 
 def aggregate(args: argparse.Namespace) -> None:
@@ -701,6 +874,7 @@ def aggregate(args: argparse.Namespace) -> None:
         "dataset_sample_count",
         "samples_per_doc",
         "batch_size",
+        "scheduler_queue_size",
         "max_num_seqs",
         "max_model_len",
         "sampling_seed",
@@ -713,11 +887,24 @@ def aggregate(args: argparse.Namespace) -> None:
         "attention_backend",
         "flash_attn_version",
         "hlm_attention_impl",
+        "speculative_decoding",
+        "speculative_method",
+        "speculative_num_tokens",
+        "speculative_draft_attention_backend",
+        "speculative_context_kv_cache",
+        "speculative_sparse_context_projection",
+        "speculative_min_eligible_batch",
+        "speculative_min_proposal_tokens_per_row",
+        "speculative_min_proposal_tokens_per_batch",
+        "speculative_runtime_block_size",
+        "speculative_active_batch_widths",
+        "speculative_dynamic_runtime_block_size",
+        "speculative_runtime_layer_count",
         "model_family",
-        "model_artifact",
         "input_manifest_sha256",
     ):
         _require_consistent(results, field)
+    model_artifact = _require_consistent_model_artifact(results)
     predictions.sort(key=lambda row: (int(row["doc_index"]), int(row["sample_index"])))
     request_keys = [(int(row["doc_index"]), int(row["sample_index"])) for row in predictions]
     expected_keys = [
@@ -763,7 +950,7 @@ def aggregate(args: argparse.Namespace) -> None:
         )
     aggregate_result = {
         "status": "GSM8K_VLLM_EVAL_OK",
-        "model_identifier": str(_require_consistent(results, "model_artifact")["model_dir"]),
+        "model_identifier": str(model_artifact["model_dir"]),
         "model_family": model_family,
         "backend": "native_vllm",
         "task": args.task_name,
@@ -784,6 +971,7 @@ def aggregate(args: argparse.Namespace) -> None:
         "sampling_seed_semantics": _require_consistent(results, "sampling_seed_semantics"),
         "prompt_sha256": prompt_sha,
         "batch_size": _require_consistent(results, "batch_size"),
+        "scheduler_queue_size": _require_consistent(results, "scheduler_queue_size"),
         "max_num_seqs": _require_consistent(results, "max_num_seqs"),
         "max_model_len": _require_consistent(results, "max_model_len"),
         "gpu_count": args.world_size,
@@ -816,8 +1004,40 @@ def aggregate(args: argparse.Namespace) -> None:
         "flash_attn_version": _require_consistent(results, "flash_attn_version"),
         "hlm_attention_impl": _require_consistent(results, "hlm_attention_impl"),
         "prefix_caching": False,
-        "speculative_decoding": False,
-        "model_artifact": _require_consistent(results, "model_artifact"),
+        "speculative_decoding": _require_consistent(results, "speculative_decoding"),
+        "speculative_method": _require_consistent(results, "speculative_method"),
+        "speculative_num_tokens": _require_consistent(results, "speculative_num_tokens"),
+        "speculative_draft_attention_backend": _require_consistent(
+            results, "speculative_draft_attention_backend"
+        ),
+        "speculative_context_kv_cache": _require_consistent(
+            results, "speculative_context_kv_cache"
+        ),
+        "speculative_sparse_context_projection": _require_consistent(
+            results, "speculative_sparse_context_projection"
+        ),
+        "speculative_min_eligible_batch": _require_consistent(
+            results, "speculative_min_eligible_batch"
+        ),
+        "speculative_min_proposal_tokens_per_row": _require_consistent(
+            results, "speculative_min_proposal_tokens_per_row"
+        ),
+        "speculative_min_proposal_tokens_per_batch": _require_consistent(
+            results, "speculative_min_proposal_tokens_per_batch"
+        ),
+        "speculative_runtime_block_size": _require_consistent(
+            results, "speculative_runtime_block_size"
+        ),
+        "speculative_active_batch_widths": _require_consistent(
+            results, "speculative_active_batch_widths"
+        ),
+        "speculative_dynamic_runtime_block_size": _require_consistent(
+            results, "speculative_dynamic_runtime_block_size"
+        ),
+        "speculative_runtime_layer_count": _require_consistent(
+            results, "speculative_runtime_layer_count"
+        ),
+        "model_artifact": model_artifact,
         "vllm_version": _require_consistent(results, "vllm_version"),
         "torch_version": _require_consistent(results, "torch_version"),
         "devices": [result["device"] for result in results],

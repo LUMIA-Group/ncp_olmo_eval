@@ -10,7 +10,12 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from vllm.attention.layer import Attention
+try:
+    # vLLM 0.13 public path used by the released ConceptLM backend.
+    from vllm.attention.layer import Attention
+except ModuleNotFoundError:
+    # vLLM >=0.25 folded the attention layer into model_executor.layers.
+    from vllm.model_executor.layers.attention import Attention
 from vllm.config import VllmConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.distributed.communication_op import tensor_model_parallel_all_gather

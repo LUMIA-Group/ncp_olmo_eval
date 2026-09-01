@@ -33,6 +33,66 @@ def _clean_git_state(root: Path) -> dict[str, object]:
     }
 
 
+def _draft_checkpoint(root: Path) -> Path:
+    draft = root / "draft"
+    draft.mkdir()
+    config = {
+        "model_type": "conceptlm_dflash",
+        "proposal_method": "path_selector",
+        "hlm_conditioning": "causal_residual",
+        "concept_chunk_size": 4,
+        "target_layer_ids": [1, 4, 7, 10, 13],
+        "block_size": 16,
+    }
+    (draft / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    (draft / "model.safetensors").write_bytes(b"draft-weights")
+    return draft
+
+
+def _verification_artifact(
+    root: Path,
+    *,
+    target: Path,
+    draft: Path,
+    mode: str = "sequential_exact",
+) -> Path:
+    config = draft / "config.json"
+    weights = draft / "model.safetensors"
+    approximate = mode == "segmented_kv_approx"
+    payload = {
+        "status": (
+            "NCP_DFLASH_VLLM_APPROXIMATE_AB_OK"
+            if approximate
+            else "NCP_DFLASH_VLLM_EXACT_MATCH_OK"
+        ),
+        "vllm_version": "0.13.0",
+        "speculative_verification_mode": mode,
+        "speculative_output_contract": "approximate" if approximate else "target_exact",
+        "downstream_score_required": approximate,
+        "exact_token_match_count": 7 if approximate else 8,
+        "comparison_count": 8,
+        "generated_token_count": 1024,
+        "throughput_speedup": 1.2 if approximate else 1.0,
+        "benchmark_contract": {
+            "seed": 42,
+            "prompt_count": 8,
+            "max_new_tokens": 128,
+            "batch_size": 1,
+            "ignore_eos": True,
+        },
+        "target_model_identity": {"source_model": str(target.resolve())},
+        "draft_model_identity": {
+            "path": str(draft.resolve()),
+            "config_sha256": evaluation_cli._sha256(config),
+            "weights_size": weights.stat().st_size,
+            "weights_mtime_ns": weights.stat().st_mtime_ns,
+        },
+    }
+    path = root / f"comparison-{mode}.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_registration_is_vllm_only_and_versioned(tmp_path: Path) -> None:
     evaluation_root = tmp_path / "evaluations"
     checkpoint = _checkpoint(tmp_path)
@@ -52,6 +112,53 @@ def test_registration_is_vllm_only_and_versioned(tmp_path: Path) -> None:
     with pytest.raises(evaluation_cli.EvaluationError, match="不支持"):
         evaluation_cli.register_model(
             root=evaluation_root, checkpoint=checkpoint, backend="hf", new_version=False
+        )
+
+
+def test_speculative_registration_is_target_and_draft_bound(tmp_path: Path) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _draft_checkpoint(tmp_path)
+    verification = _verification_artifact(
+        tmp_path, target=checkpoint, draft=draft
+    )
+
+    registration = evaluation_cli.register_model(
+        root=evaluation_root,
+        checkpoint=checkpoint,
+        backend="vllm",
+        new_version=False,
+        vllm_speculative_draft_model=draft,
+        vllm_speculative_verification=verification,
+    )
+
+    assert registration["vllm_speculative_correctness_status"] == "EXACT_MATCH_VERIFIED"
+    assert registration["vllm_speculative_verification"]["vllm_version"] == "0.13.0"
+    _, loaded = evaluation_cli.load_registration(
+        evaluation_root, registration["registration_name"]
+    )
+    assert loaded["vllm_speculative_draft_model"] == str(draft.resolve())
+
+
+def test_approximate_speculative_registration_requires_opt_in(tmp_path: Path) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _draft_checkpoint(tmp_path)
+    verification = _verification_artifact(
+        tmp_path,
+        target=checkpoint,
+        draft=draft,
+        mode="segmented_kv_approx",
+    )
+
+    with pytest.raises(evaluation_cli.EvaluationError, match="显式设置"):
+        evaluation_cli.register_model(
+            root=evaluation_root,
+            checkpoint=checkpoint,
+            backend="vllm",
+            new_version=False,
+            vllm_speculative_draft_model=draft,
+            vllm_speculative_verification=verification,
         )
 
 
@@ -115,6 +222,49 @@ def test_dry_run_builds_five_portable_core88_tasks(
         argv = task["command"]["argv"]
         assert "--no-allow-unverified-lmdeploy" not in argv
     assert not (evaluation_root / registration["registration_name"] / "core88").exists()
+
+
+def test_speculative_core88_dry_run_propagates_sealed_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _draft_checkpoint(tmp_path)
+    registration = evaluation_cli.register_model(
+        root=evaluation_root,
+        checkpoint=checkpoint,
+        backend="vllm",
+        new_version=False,
+        vllm_speculative_draft_model=draft,
+        vllm_speculative_verification=_verification_artifact(
+            tmp_path, target=checkpoint, draft=draft
+        ),
+    )
+    monkeypatch.setattr(evaluation_cli, "_git_state", lambda _: _clean_git_state(tmp_path))
+
+    result = evaluation_cli.submit_inference(
+        root=evaluation_root,
+        registration_name=registration["registration_name"],
+        benchmark="core88",
+        data_root=None,
+        executor="emit",
+        force=False,
+        dry_run=True,
+    )
+
+    for task in result["jobs"][:4]:
+        argv = task["command"]["argv"]
+        assert argv[argv.index("--generation-batch-size") + 1] == "1"
+        assert argv[argv.index("--vllm-speculative-draft-model") + 1] == str(
+            draft.resolve()
+        )
+    gsm8k_argv = result["jobs"][4]["command"]["argv"]
+    assert gsm8k_argv[gsm8k_argv.index("--batch-size") + 1] == "1"
+    assert gsm8k_argv[gsm8k_argv.index("--speculative-draft-model") + 1] == str(
+        draft.resolve()
+    )
+    with pytest.raises(evaluation_cli.EvaluationError, match="拒绝"):
+        evaluation_cli._protocol_for_registration(registration, "ruler")
 
 
 def test_emit_materializes_scheduler_neutral_gsm8k_plan(

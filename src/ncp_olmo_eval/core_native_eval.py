@@ -56,6 +56,9 @@ from .native_vllm_inference import (
     NativeVLLMInferencer,
     add_native_vllm_args,
     native_vllm_max_model_len,
+    native_vllm_scheduler_queue_size,
+    native_vllm_speculative_kwargs,
+    native_vllm_speculative_manifest,
     prepare_native_vllm_model,
     validate_native_vllm_args,
 )
@@ -1345,31 +1348,51 @@ def _generate_task(
         (_stable_id(row["example_id"]), sample_index) for row, sample_index in requests
     }
     completed = len(expected_samples & completed_samples)
-    for start in range(0, len(requests), args.generation_batch_size):
-        request_batch = requests[start : start + args.generation_batch_size]
+    request_queue_size = (
+        native_vllm_scheduler_queue_size(args, args.generation_batch_size)
+        if isinstance(inferencer, NativeVLLMInferencer)
+        else args.generation_batch_size
+    )
+    for start in range(0, len(requests), request_queue_size):
+        request_batch = requests[start : start + request_queue_size]
         if all(
             (_stable_id(row["example_id"]), sample_index) in completed_samples
             for row, sample_index in request_batch
         ):
             continue
-        batch_index = start // args.generation_batch_size
-        sample_seed = (
-            EVALUATION_SEED
-            + int(task["task_order"]) * 1_000_003
-            + batch_index
-        ) % (2**31 - 1)
-        completions = inferencer.generate(
-            [str(row["input"]) for row, _ in request_batch],
+        request_sample_seeds = [
+            (
+                EVALUATION_SEED
+                + int(task["task_order"]) * 1_000_003
+                + (start + offset) // args.generation_batch_size
+            )
+            % (2**31 - 1)
+            for offset in range(len(request_batch))
+        ]
+        request_samplings = [
             SamplingParams(
                 max_tokens=int(contract["max_gen_toks"]),
                 temperature=(float(contract["temperature"]) if contract["do_sample"] else 0.0),
                 top_p=float(contract["top_p"]),
                 stop=list(contract["stop_strings"]),
                 seed=sample_seed,
-            ),
-        )
+            )
+            for sample_seed in request_sample_seeds
+        ]
+        if isinstance(inferencer, NativeVLLMInferencer):
+            completions = inferencer.generate_batch(
+                [str(row["input"]) for row, _ in request_batch],
+                request_samplings,
+            )
+        else:
+            completions = inferencer.generate(
+                [str(row["input"]) for row, _ in request_batch],
+                request_samplings[0],
+            )
         records: list[dict[str, Any]] = []
-        for (row, sample_index), completion in zip(request_batch, completions, strict=True):
+        for (row, sample_index), sample_seed, completion in zip(
+            request_batch, request_sample_seeds, completions, strict=True
+        ):
             sample_key = (_stable_id(row["example_id"]), sample_index)
             if sample_key in completed_samples:
                 continue
@@ -1884,13 +1907,16 @@ def main() -> None:
                 "model_family": args.vllm_model_family,
                 "max_model_len": native_vllm_max_model_len(args),
                 "max_num_seqs": _max_inference_batch_size(args),
+                "scheduler_queue_size": native_vllm_scheduler_queue_size(
+                    args, _max_inference_batch_size(args)
+                ),
                 "execution_mode": args.vllm_execution_mode,
                 "gpu_memory_utilization": args.vllm_gpu_memory_utilization,
                 "attention_backend": args.vllm_attention_backend,
                 "flash_attn_version": args.vllm_flash_attn_version,
                 "hlm_attention_impl": args.vllm_hlm_attention_impl,
                 "prefix_caching": False,
-                "speculative_decoding": False,
+                **native_vllm_speculative_manifest(args),
             }
             if hf_backend == NATIVE_VLLM_BACKEND
             else None
@@ -1954,6 +1980,9 @@ def main() -> None:
             model_path=args.hf_model_path,
             max_model_len=native_vllm_max_model_len(args),
             max_batch_size=_max_inference_batch_size(args),
+            scheduler_queue_size=native_vllm_scheduler_queue_size(
+                args, _max_inference_batch_size(args)
+            ),
             seed=EVALUATION_SEED,
             gpu_memory_utilization=args.vllm_gpu_memory_utilization,
             execution_mode=args.vllm_execution_mode,
@@ -1961,6 +1990,7 @@ def main() -> None:
             flash_attn_version=args.vllm_flash_attn_version,
             hlm_attention_impl=args.vllm_hlm_attention_impl,
             model_family=args.vllm_model_family,
+            **native_vllm_speculative_kwargs(args),
         )
         model = None
         tokenizer = native_inferencer.tokenizer

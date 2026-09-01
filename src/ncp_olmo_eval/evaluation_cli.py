@@ -32,6 +32,12 @@ from .core_native_contract import (
     CORE88_PLAN_SCHEMA,
 )
 from .long_context_protocol import HELMET_SWEEP_INPUT_LENGTHS, RULER_SEQUENCE_LENGTHS
+from .native_vllm_inference import (
+    NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES,
+    NCP_DFLASH_EXACT_VERIFICATION_MODES,
+    NCP_DFLASH_VERIFICATION_MODES,
+    normalize_ncp_dflash_verification_mode,
+)
 from .source_identity import source_state
 from .task_spec import Resources, TaskSpec, read_status, write_plan, write_status, write_task
 
@@ -380,6 +386,124 @@ def _existing_versions(root: Path, model_key: str) -> list[tuple[int, Path]]:
     return sorted(matches)
 
 
+def _validate_dflash_verification(
+    verification_path: Path,
+    *,
+    checkpoint_path: Path,
+    draft_model: Path,
+    draft_validation: dict[str, Any],
+    allow_approximate: bool = False,
+) -> dict[str, Any]:
+    """Validate a target/draft-bound DFlash A/B artifact."""
+
+    path = verification_path.expanduser().resolve()
+    if not path.is_file():
+        raise EvaluationError(f"NCP DFlash correctness artifact 不存在：{path}")
+    verification = _read_json(path)
+    exact = int(verification.get("exact_token_match_count", -1))
+    comparisons = int(verification.get("comparison_count", -1))
+    generated = int(verification.get("generated_token_count", -1))
+    vllm_version = str(verification.get("vllm_version", ""))
+    verification_mode = normalize_ncp_dflash_verification_mode(
+        str(verification.get("speculative_verification_mode", ""))
+    )
+    approximate_mode = verification_mode in NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES
+    if comparisons < 8 or generated < 1024:
+        raise EvaluationError(
+            "NCP DFlash A/B artifact 未覆盖至少 8 prompts / 1024 tokens"
+        )
+    if vllm_version != "0.13.0":
+        raise EvaluationError(
+            "NCP DFlash correctness artifact 必须来自 vLLM 0.13.0，"
+            f"当前为 {vllm_version or 'missing'}"
+        )
+    if verification_mode not in NCP_DFLASH_VERIFICATION_MODES:
+        raise EvaluationError(
+            "NCP DFlash correctness artifact 缺少受支持的 verification mode"
+        )
+    try:
+        throughput_speedup = float(
+            verification.get("throughput_speedup", float("nan"))
+        )
+    except (TypeError, ValueError):
+        throughput_speedup = float("nan")
+    if verification_mode != "sequential_exact" and (
+        not math.isfinite(throughput_speedup) or throughput_speedup <= 1.0
+    ):
+        raise EvaluationError(
+            "NCP DFlash parallel artifact 必须同时证明吞吐快于 target-only"
+        )
+    if approximate_mode:
+        if not allow_approximate:
+            raise EvaluationError(
+                "segmented_kv_approx 可能改变生成 token；注册时必须显式设置 "
+                "--vllm-speculative-allow-approximate"
+            )
+        if (
+            verification.get("status") != "NCP_DFLASH_VLLM_APPROXIMATE_AB_OK"
+            or verification.get("speculative_output_contract") != "approximate"
+            or verification.get("downstream_score_required") is not True
+        ):
+            raise EvaluationError(
+                "segmented_kv_approx artifact 缺少 approximate A/B 合同"
+            )
+        validation_status = "APPROXIMATE_AB_VERIFIED"
+        output_contract = "approximate"
+    else:
+        if (
+            verification_mode not in NCP_DFLASH_EXACT_VERIFICATION_MODES
+            or verification.get("status") != "NCP_DFLASH_VLLM_EXACT_MATCH_OK"
+            or exact != comparisons
+        ):
+            raise EvaluationError(
+                "NCP DFlash correctness artifact 未通过逐 token exact-match 门槛"
+            )
+        validation_status = "EXACT_MATCH_VERIFIED"
+        output_contract = "target_exact"
+    contract = verification.get("benchmark_contract")
+    if not isinstance(contract, dict) or (
+        int(contract.get("seed", -1)) != DEFAULT_GLOBAL_SEED
+        or int(contract.get("prompt_count", -1)) < 8
+        or int(contract.get("max_new_tokens", -1)) < 128
+        or int(contract.get("batch_size", -1)) != 1
+        or contract.get("ignore_eos") is not True
+    ):
+        raise EvaluationError("NCP DFlash correctness artifact 的 benchmark 合同不完整")
+    target_identity = verification.get("target_model_identity")
+    if not isinstance(target_identity, dict) or Path(
+        str(target_identity.get("source_model", ""))
+    ).resolve() != checkpoint_path.resolve():
+        raise EvaluationError("NCP DFlash correctness artifact 与当前 target 不匹配")
+    draft_identity = verification.get("draft_model_identity")
+    expected_draft = {
+        "path": str(draft_model.resolve()),
+        "config_sha256": draft_validation["config_sha256"],
+        "weights_size": draft_validation["weights_size"],
+        "weights_mtime_ns": draft_validation["weights_mtime_ns"],
+    }
+    if not isinstance(draft_identity, dict) or any(
+        draft_identity.get(key) != value for key, value in expected_draft.items()
+    ):
+        raise EvaluationError("NCP DFlash correctness artifact 与当前 draft 不匹配")
+    return {
+        "status": validation_status,
+        "path": str(path),
+        "sha256": _sha256(path),
+        "exact_token_match_count": exact,
+        "comparison_count": comparisons,
+        "generated_token_count": generated,
+        "vllm_version": vllm_version,
+        "speculative_verification_mode": verification_mode,
+        "speculative_output_contract": output_contract,
+        "downstream_score_required": approximate_mode,
+        "exact_prompt_match_rate": exact / comparisons if comparisons else None,
+        "throughput_speedup": (
+            throughput_speedup if math.isfinite(throughput_speedup) else None
+        ),
+        "benchmark_contract": contract,
+    }
+
+
 def register_model(
     *,
     root: Path,
@@ -390,6 +514,9 @@ def register_model(
     train_wandb_config: Path | None = None,
     model_config_path: Path | None = None,
     vllm_runtime_config: Path | None = None,
+    vllm_speculative_draft_model: Path | None = None,
+    vllm_speculative_verification: Path | None = None,
+    vllm_speculative_allow_approximate: bool = False,
 ) -> dict[str, Any]:
     """Register one immutable checkpoint/backend pair in a versioned directory."""
 
@@ -430,6 +557,58 @@ def register_model(
         resolved_runtime_config = vllm_runtime_config.expanduser().resolve()
         if not resolved_runtime_config.is_file():
             raise EvaluationError(f"vLLM runtime config 不存在：{resolved_runtime_config}")
+    resolved_draft_model = None
+    draft_validation: dict[str, Any] | None = None
+    speculative_verification: dict[str, Any] | None = None
+    if vllm_speculative_draft_model is not None:
+        if backend != "vllm":
+            raise EvaluationError("NCP DFlash 只支持 vllm backend 注册")
+        resolved_draft_model = vllm_speculative_draft_model.expanduser().resolve()
+        draft_config_path = resolved_draft_model / "config.json"
+        draft_weights_path = resolved_draft_model / "model.safetensors"
+        if not draft_config_path.is_file() or not draft_weights_path.is_file():
+            raise EvaluationError(
+                "NCP DFlash 目录必须包含 config.json 和 model.safetensors："
+                f"{resolved_draft_model}"
+            )
+        draft_config = _read_json(draft_config_path)
+        expected = {
+            "model_type": "conceptlm_dflash",
+            "proposal_method": "path_selector",
+            "hlm_conditioning": "causal_residual",
+            "concept_chunk_size": 4,
+            "target_layer_ids": [1, 4, 7, 10, 13],
+        }
+        mismatched = {
+            key: (draft_config.get(key), value)
+            for key, value in expected.items()
+            if draft_config.get(key) != value
+        }
+        if mismatched:
+            raise EvaluationError(f"NCP DFlash 配置不符合已验证合同：{mismatched}")
+        draft_validation = {
+            "config_sha256": _sha256(draft_config_path),
+            "weights_size": draft_weights_path.stat().st_size,
+            "weights_mtime_ns": draft_weights_path.stat().st_mtime_ns,
+            "block_size": int(draft_config["block_size"]),
+            **expected,
+        }
+        if vllm_speculative_verification is not None:
+            speculative_verification = _validate_dflash_verification(
+                vllm_speculative_verification,
+                checkpoint_path=checkpoint_path,
+                draft_model=resolved_draft_model,
+                draft_validation=draft_validation,
+                allow_approximate=vllm_speculative_allow_approximate,
+            )
+    elif vllm_speculative_verification is not None:
+        raise EvaluationError(
+            "--vllm-speculative-verification 必须与 draft checkpoint 一起提供"
+        )
+    elif vllm_speculative_allow_approximate:
+        raise EvaluationError(
+            "--vllm-speculative-allow-approximate 必须与 draft checkpoint 一起提供"
+        )
     key = _model_key(checkpoint_path, backend)
     with _locked(root):
         versions = _existing_versions(root, key)
@@ -462,6 +641,19 @@ def register_model(
             "model_config_path": str(resolved_model_config),
             "vllm_runtime_config": (
                 str(resolved_runtime_config) if resolved_runtime_config else ""
+            ),
+            "vllm_speculative_draft_model": (
+                str(resolved_draft_model) if resolved_draft_model else ""
+            ),
+            "vllm_speculative_draft_validation": draft_validation,
+            "vllm_speculative_verification": speculative_verification,
+            "vllm_speculative_allow_approximate": bool(
+                vllm_speculative_allow_approximate
+            ),
+            "vllm_speculative_correctness_status": (
+                str(speculative_verification["status"])
+                if speculative_verification is not None
+                else ("UNVERIFIED" if resolved_draft_model else "NOT_APPLICABLE")
             ),
         }
         _write_json(model_root / "metadata.json", metadata)
@@ -498,6 +690,38 @@ def load_registration(root: Path, name: str) -> tuple[Path, dict[str, Any]]:
         value = str(metadata.get(field, ""))
         if value and not Path(value).is_file():
             raise EvaluationError(f"注册 metadata 引用的文件已不存在：{field}={value}")
+    draft_value = str(metadata.get("vllm_speculative_draft_model", ""))
+    if draft_value:
+        draft_root = Path(draft_value)
+        draft_config_path = draft_root / "config.json"
+        draft_weights_path = draft_root / "model.safetensors"
+        if not draft_config_path.is_file() or not draft_weights_path.is_file():
+            raise EvaluationError(f"注册的 NCP DFlash checkpoint 已不完整：{draft_root}")
+        validation = metadata.get("vllm_speculative_draft_validation")
+        current = {
+            "config_sha256": _sha256(draft_config_path),
+            "weights_size": draft_weights_path.stat().st_size,
+            "weights_mtime_ns": draft_weights_path.stat().st_mtime_ns,
+        }
+        if not isinstance(validation, dict) or any(
+            validation.get(key) != value for key, value in current.items()
+        ):
+            raise EvaluationError("NCP DFlash checkpoint 自注册后发生变化，请新注册版本")
+        verification = metadata.get("vllm_speculative_verification")
+        if verification is not None:
+            if not isinstance(verification, dict):
+                raise EvaluationError("NCP DFlash correctness metadata 已损坏")
+            current_verification = _validate_dflash_verification(
+                Path(str(verification.get("path", ""))),
+                checkpoint_path=checkpoint_path,
+                draft_model=draft_root,
+                draft_validation=validation,
+                allow_approximate=bool(
+                    metadata.get("vllm_speculative_allow_approximate", False)
+                ),
+            )
+            if _canonical_hash(current_verification) != _canonical_hash(verification):
+                raise EvaluationError("NCP DFlash correctness artifact 自注册后发生变化")
     return model_root, metadata
 
 
@@ -625,6 +849,55 @@ def protocol_for(backend: str, benchmark: str) -> dict[str, Any]:
     return protocol
 
 
+def _protocol_for_registration(
+    registration: dict[str, Any], benchmark: str
+) -> dict[str, Any]:
+    """Bind speculative generation to the batch shape proven by its artifact."""
+
+    backend = str(registration["backend"])
+    protocol = protocol_for(backend, benchmark)
+    draft_model = str(registration.get("vllm_speculative_draft_model", ""))
+    if not draft_model:
+        return protocol
+    if backend != "vllm":
+        raise EvaluationError("NCP DFlash speculative decoding 只支持 vLLM backend")
+    if benchmark not in {"gsm8k", "core88"}:
+        raise EvaluationError(
+            "NCP DFlash 当前只完成 GSM8K/Core88 生成路径验证；"
+            f"拒绝将该 speculative 注册用于 {benchmark}"
+        )
+    verification = registration.get("vllm_speculative_verification")
+    contract = verification.get("benchmark_contract") if isinstance(verification, dict) else None
+    if not isinstance(contract, dict):
+        raise EvaluationError("NCP DFlash 注册缺少 correctness artifact benchmark 合同")
+    verified_batch_size = int(contract.get("batch_size", -1))
+    if verified_batch_size <= 0:
+        raise EvaluationError("NCP DFlash correctness artifact 缺少有效 batch size")
+    protocol["speculative_decoding"] = {
+        "enabled": True,
+        "draft_model": draft_model,
+        "verification_mode": str(
+            verification.get("speculative_verification_mode", "")
+        ),
+        "vllm_version": str(verification.get("vllm_version", "")),
+        "verified_generation_batch_size": verified_batch_size,
+        "output_contract": str(
+            verification.get("speculative_output_contract", "target_exact")
+        ),
+        "downstream_score_required": bool(
+            verification.get("downstream_score_required", False)
+        ),
+        "baseline_requirement": (
+            "matched_target_only_registration"
+            if verification.get("downstream_score_required") is True
+            else "none"
+        ),
+    }
+    if benchmark in {"gsm8k", "core88"}:
+        protocol["generation_batch_size"] = verified_batch_size
+    return protocol
+
+
 def _benchmark_path(model_root: Path, benchmark: str) -> Path:
     return model_root / benchmark
 
@@ -644,7 +917,7 @@ def _load_benchmark_state(
         "benchmark": benchmark,
         "registration_id": registration["registration_id"],
         "registration_name": registration["registration_name"],
-        "protocol": protocol_for(str(registration["backend"]), benchmark),
+        "protocol": _protocol_for_registration(registration, benchmark),
         "created_at": _utc_now(),
         "inference_attempts": [],
         "scoring_attempts": [],
@@ -662,7 +935,7 @@ def _require_current_inference_protocol(
 ) -> None:
     """Prevent resume from mixing predictions produced under another seed."""
 
-    expected = protocol_for(str(registration["backend"]), benchmark)
+    expected = _protocol_for_registration(registration, benchmark)
     actual = state.get("protocol")
     if actual == expected:
         return
@@ -795,7 +1068,86 @@ def _base_launch_env(registration: dict[str, Any]) -> dict[str, str]:
         "NLTK_DATA": os.environ.get("NLTK_DATA", ""),
     }
     env.update({key: value for key, value in configured.items() if value})
+    draft_model = str(registration.get("vllm_speculative_draft_model", ""))
+    if draft_model:
+        verification_status = str(
+            registration.get("vllm_speculative_correctness_status", "")
+        )
+        if verification_status not in {
+            "EXACT_MATCH_VERIFIED",
+            "APPROXIMATE_AB_VERIFIED",
+        }:
+            raise EvaluationError(
+                "NCP DFlash 已注册但尚未通过当前 target/draft 绑定的 "
+                "8 prompts / 1024 tokens A/B 门槛；统一入口拒绝启用 speculative"
+            )
+        verification = registration.get("vllm_speculative_verification")
+        if not isinstance(verification, dict):
+            raise EvaluationError("NCP DFlash 注册缺少 correctness artifact 元数据")
+        verification_mode = str(
+            verification.get("speculative_verification_mode", "")
+        )
+        if verification_mode not in NCP_DFLASH_VERIFICATION_MODES:
+            raise EvaluationError("NCP DFlash 注册缺少受支持的 verification mode")
+        if (
+            verification_mode in NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES
+            and verification_status != "APPROXIMATE_AB_VERIFIED"
+        ):
+            raise EvaluationError("近似 DFlash mode 与注册 A/B 状态不一致")
+        env.update(
+            {
+                "VLLM_SPECULATIVE_OUTPUT_CONTRACT": str(
+                    verification.get(
+                        "speculative_output_contract", "target_exact"
+                    )
+                ),
+            }
+        )
+        for name in (
+            "CONCEPTLM_DFLASH_ATTENTION_BACKEND",
+            "CONCEPTLM_DFLASH_CONTEXT_KV_CACHE",
+            "CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION",
+            "CONCEPTLM_DFLASH_MIN_ELIGIBLE_BATCH",
+            "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW",
+            "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH",
+            "CONCEPTLM_DFLASH_RUNTIME_BLOCK_SIZE",
+            "CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS",
+            "CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE",
+            "CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT",
+            "CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER",
+            "CONCEPTLM_DFLASH_MIXER_COMPILE_MODE",
+            "CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL",
+        ):
+            value = os.environ.get(name, "")
+            if value:
+                env[name] = value
     return env
+
+
+def _speculative_cli_args(
+    registration: dict[str, Any],
+    *,
+    telemetry_path: Path,
+    option_prefix: str,
+) -> list[str]:
+    """Return the sealed draft arguments for one emitted inference task."""
+
+    draft_model = str(registration.get("vllm_speculative_draft_model", ""))
+    if not draft_model:
+        return []
+    verification = registration.get("vllm_speculative_verification")
+    if not isinstance(verification, dict):
+        raise EvaluationError("NCP DFlash 注册缺少 correctness artifact 元数据")
+    return [
+        f"--{option_prefix}speculative-draft-model",
+        draft_model,
+        f"--{option_prefix}speculative-num-tokens",
+        "16",
+        f"--{option_prefix}speculative-telemetry-path",
+        str(telemetry_path),
+        f"--{option_prefix}speculative-verification-mode",
+        str(verification["speculative_verification_mode"]),
+    ]
 
 
 def _model_family(registration: dict[str, Any]) -> str:
@@ -824,7 +1176,7 @@ def _hf_runtime_backend(registration: dict[str, Any]) -> str:
 def _gsm8k_command(
     registration: dict[str, Any], output_dir: Path, job_name: str
 ) -> CommandSpec:
-    protocol = protocol_for(str(registration["backend"]), "gsm8k")
+    protocol = _protocol_for_registration(registration, "gsm8k")
     argv = [
         PYTHON_BIN,
         "-m",
@@ -848,10 +1200,24 @@ def _gsm8k_command(
         str(protocol["fewshot_seed"]),
         "--sampling-seed",
         str(protocol["sampling_seed"]),
+        "--batch-size",
+        str(protocol.get("generation_batch_size", protocol["batch_size"])),
         "--resume",
     ]
     if registration.get("vllm_runtime_config"):
         argv.extend(["--runtime-config", str(registration["vllm_runtime_config"])])
+    if registration.get("vllm_speculative_draft_model"):
+        verification = registration["vllm_speculative_verification"]
+        argv.extend(
+            [
+                "--speculative-draft-model",
+                str(registration["vllm_speculative_draft_model"]),
+                "--speculative-num-tokens",
+                "16",
+                "--speculative-verification-mode",
+                str(verification["speculative_verification_mode"]),
+            ]
+        )
     return CommandSpec(
         tuple(argv),
         _base_launch_env(registration),
@@ -1029,7 +1395,7 @@ def _core_commands(
     if len(job_names) != 5:
         raise EvaluationError("Core88 需要四个主任务和一个 GSM8K 任务")
     backend = str(registration["backend"])
-    protocol = protocol_for(backend, "core88")
+    protocol = _protocol_for_registration(registration, "core88")
     core_root = attempt_root
     plan_root = core_root / "dispatch-plan"
     if backend != "vllm":
@@ -1060,7 +1426,8 @@ def _core_commands(
             "--worker-start-stagger-seconds", "2",
             "--seq-length", "2048",
             "--score-batch-size", "8",
-            "--generation-batch-size", "8",
+            "--generation-batch-size",
+            str(protocol.get("generation_batch_size", protocol["batch_size"])),
             "--row-chunk-size", "8",
             "--pad-multiple", "128",
             "--progress-every", "100",
@@ -1082,6 +1449,15 @@ def _core_commands(
         ]
         if registration.get("vllm_runtime_config"):
             argv.extend(["--vllm-runtime-config", str(registration["vllm_runtime_config"])])
+        argv.extend(
+            _speculative_cli_args(
+                registration,
+                telemetry_path=core_root
+                / f"machine-{machine_index:02d}"
+                / "ncp-dflash-telemetry.jsonl",
+                option_prefix="vllm-",
+            )
+        )
         commands.append(
             CommandSpec(
                 tuple(argv),
@@ -1144,7 +1520,7 @@ def _create_core_workflow(
         return None
     from .core88_workflow import create_workflow
 
-    protocol = protocol_for(backend, "core88")
+    protocol = _protocol_for_registration(registration, "core88")
     return create_workflow(
         output_root=attempt_root,
         repo_root=_repo_root(),
@@ -1168,7 +1544,9 @@ def _create_core_workflow(
         ),
         processes_per_gpu=1,
         score_batch_size=int(protocol["batch_size"]),
-        generation_batch_size=int(protocol["batch_size"]),
+        generation_batch_size=int(
+            protocol.get("generation_batch_size", protocol["batch_size"])
+        ),
         row_chunk_size=int(protocol["batch_size"]),
         seq_length=2048,
         vllm_max_model_len=int(protocol.get("vllm_max_model_len", 0)),
@@ -1183,6 +1561,11 @@ def _long_context_command(
     output_dir: Path,
     job_name: str,
 ) -> CommandSpec:
+    if registration.get("vllm_speculative_draft_model"):
+        raise EvaluationError(
+            "NCP DFlash 当前只完成 Core88/GSM8K 短上下文正确性验证；"
+            f"拒绝将该 speculative 注册用于 {benchmark}"
+        )
     argv = [
         PYTHON_BIN, "-m", "ncp_olmo_eval.portable_tasks", "long-context",
         "--data-root", str(data_root),
@@ -2628,11 +3011,26 @@ def interactive(root: Path) -> dict[str, Any]:
         tokenizer_model = None
         train_wandb_config = None
         model_config_path = None
+        vllm_speculative_draft_model = None
+        vllm_speculative_verification = None
+        vllm_speculative_allow_approximate = False
         if backend == "megatron":
             tokenizer_model = Path(input("tokenizer 目录：").strip())
             train_wandb_config = Path(input("训练 wandb/config JSON：").strip())
             value = input("模型上下文 config.json（回车表示 tokenizer/config.json）：").strip()
             model_config_path = Path(value) if value else None
+        elif backend == "vllm":
+            value = input("NCP DFlash checkpoint（回车禁用）：").strip()
+            vllm_speculative_draft_model = Path(value) if value else None
+            if vllm_speculative_draft_model is not None:
+                value = input(
+                    "target/spec comparison.json（回车仅注册实验，不允许正式推理）："
+                ).strip()
+                vllm_speculative_verification = Path(value) if value else None
+                if vllm_speculative_verification is not None:
+                    vllm_speculative_allow_approximate = input(
+                        "允许注册会改变 token 的近似加速路径？[y/N]："
+                    ).strip().lower() in {"y", "yes"}
         return register_model(
             root=root,
             checkpoint=checkpoint,
@@ -2641,6 +3039,11 @@ def interactive(root: Path) -> dict[str, Any]:
             tokenizer_model=tokenizer_model,
             train_wandb_config=train_wandb_config,
             model_config_path=model_config_path,
+            vllm_speculative_draft_model=vllm_speculative_draft_model,
+            vllm_speculative_verification=vllm_speculative_verification,
+            vllm_speculative_allow_approximate=(
+                vllm_speculative_allow_approximate
+            ),
         )
     registration = input("测评目录名称（如 vllm-abc123-v1）：").strip()
     model_root, metadata = load_registration(root, registration)
@@ -2717,6 +3120,16 @@ def _parser() -> argparse.ArgumentParser:
     register.add_argument("--train-wandb-config", type=Path)
     register.add_argument("--model-config-path", type=Path)
     register.add_argument("--vllm-runtime-config", type=Path)
+    register.add_argument("--vllm-speculative-draft-model", type=Path)
+    register.add_argument("--vllm-speculative-verification", type=Path)
+    register.add_argument(
+        "--vllm-speculative-allow-approximate",
+        action="store_true",
+        help=(
+            "explicitly register segmented_kv_approx despite token divergence; "
+            "the evaluation version then requires matched downstream A/B"
+        ),
+    )
 
     for action in ("infer", "score", "final", "status"):
         command = subparsers.add_parser(action)
@@ -2753,6 +3166,11 @@ def run_cli(argv: Sequence[str] | None = None) -> dict[str, Any]:
             train_wandb_config=args.train_wandb_config,
             model_config_path=args.model_config_path,
             vllm_runtime_config=args.vllm_runtime_config,
+            vllm_speculative_draft_model=args.vllm_speculative_draft_model,
+            vllm_speculative_verification=args.vllm_speculative_verification,
+            vllm_speculative_allow_approximate=(
+                args.vllm_speculative_allow_approximate
+            ),
         )
     if args.action == "infer":
         return submit_inference(

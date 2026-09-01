@@ -1,7 +1,7 @@
 # Evaluation protocols
 
 This document describes the benchmark protocol introduced by `v0.1.0a1` and
-retained by the scheduler-neutral `v0.1.0a11` work. Result metadata is
+retained by the scheduler-neutral `v0.1.0a12` work. Result metadata is
 authoritative when it is more specific than this overview.
 
 ## Common contract
@@ -11,6 +11,31 @@ authoritative when it is more specific than this overview.
 - Model registration is versioned and immutable.
 - Resume is enabled, but only within the same recorded protocol.
 - Inference and scoring artifacts retain source/model fingerprints.
+
+## NCP DFlash speculative registrations
+
+Speculative decoding does not modify the target-only contracts below. It is a
+separate NCP OLMo registration that binds one target, one draft checkpoint,
+one verification mode, and one comparison artifact.
+
+- Runtime: exactly vLLM 0.13.0.
+- Verification: seed 42, at least eight prompts and 1,024 forced generated
+  tokens, with the target and draft artifact identities sealed.
+- Exact modes require tokenwise equality. Parallel exact mode must also prove
+  positive throughput speedup.
+- `segmented_kv_approx` requires explicit registration opt-in, records an
+  approximate output contract, and requires matched downstream score A/B.
+- The stateful NCP OLMo target tested for `0.1.0a12` did not pass either
+  exact-labelled diagnostic mode. The release makes no production exact-parity
+  claim; a failing exact artifact remains unusable, while the approximate path
+  remains a separate, quality-gated evaluation identity.
+- Only GSM8K and Core88 accept speculative registrations. SciQ likelihood,
+  RULER, and HELMET remain target-only.
+- The verified generation batch size replaces the ordinary batch size in the
+  emitted speculative generation tasks. Scoring contracts are unchanged.
+
+See [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) for the A/B command and
+runtime controls.
 
 ## GSM8K
 

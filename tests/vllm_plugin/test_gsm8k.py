@@ -17,6 +17,7 @@ from ncp_olmo_eval.vllm_plugin.gsm8k import (
     _model_fingerprint,
     _prompt_sha256,
     _rank_schedule,
+    _require_consistent_model_artifact,
     _request_seed,
     _score_prediction,
     _validate_standard_task,
@@ -116,6 +117,53 @@ def test_model_fingerprint_rejects_missing_safetensor_weights(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="no safetensor weights"):
         _model_fingerprint(model_dir)
+
+
+def test_resume_aggregation_ignores_model_overlay_mtime_only() -> None:
+    artifact = {
+        "model_dir": "/evaluation/model",
+        "files": [
+            {
+                "name": "config.json",
+                "resolved_path": "/evaluation/model/config.json",
+                "size": 100,
+                "mtime_ns": 1,
+                "sha256": "abc",
+            }
+        ],
+    }
+    resumed = {
+        "model_dir": artifact["model_dir"],
+        "files": [{**artifact["files"][0], "mtime_ns": 2}],
+    }
+
+    assert _require_consistent_model_artifact(
+        [{"model_artifact": artifact}, {"model_artifact": resumed}]
+    ) == artifact
+
+
+def test_resume_aggregation_rejects_model_content_change() -> None:
+    artifact = {
+        "model_dir": "/evaluation/model",
+        "files": [
+            {
+                "name": "config.json",
+                "resolved_path": "/evaluation/model/config.json",
+                "size": 100,
+                "mtime_ns": 1,
+                "sha256": "abc",
+            }
+        ],
+    }
+    changed = {
+        "model_dir": artifact["model_dir"],
+        "files": [{**artifact["files"][0], "mtime_ns": 2, "sha256": "def"}],
+    }
+
+    with pytest.raises(ValueError, match="inconsistent shard field model_artifact"):
+        _require_consistent_model_artifact(
+            [{"model_artifact": artifact}, {"model_artifact": changed}]
+        )
 
 
 def test_standard_task_contract_accepts_paper_protocol() -> None:

@@ -36,6 +36,7 @@ jobs:
         run: |
           python -m venv .ci/installed-package
           .ci/installed-package/bin/python -m pip install --no-deps dist/*.whl
+          .ci/installed-package/bin/ncp-olmo-eval-dflash-benchmark --help
           NCP_OLMO_SOURCE_REVISION="$(git rev-parse HEAD)" \
             .ci/installed-package/bin/python tests/installed_package_summary_smoke.py
 

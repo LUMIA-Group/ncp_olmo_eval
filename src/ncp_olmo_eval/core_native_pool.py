@@ -55,6 +55,8 @@ from .native_megatron_inference import NATIVE_MEGATRON_BACKEND
 from .native_vllm_inference import (
     NATIVE_VLLM_BACKEND,
     add_native_vllm_args,
+    native_vllm_scheduler_queue_size,
+    native_vllm_speculative_manifest,
     prepare_native_vllm_model,
     validate_native_vllm_args,
 )
@@ -182,7 +184,12 @@ def _worker_main(
         from .device_layout import local_cuda_device_index
         from .lmdeploy_inference import LMDeployInferencer
         from .native_megatron_inference import build_native_megatron_inferencer
-        from .native_vllm_inference import NativeVLLMInferencer, native_vllm_max_model_len
+        from .native_vllm_inference import (
+            NativeVLLMInferencer,
+            native_vllm_max_model_len,
+            native_vllm_scheduler_queue_size,
+            native_vllm_speculative_kwargs,
+        )
         from .transformers_inference import TransformersInferencer
 
         args = argparse.Namespace(**args_payload)
@@ -205,12 +212,16 @@ def _worker_main(
                 max_model_len=native_vllm_max_model_len(args),
                 seed=args.global_seed,
                 max_batch_size=max(args.score_batch_size, args.generation_batch_size),
+                scheduler_queue_size=native_vllm_scheduler_queue_size(
+                    args, max(args.score_batch_size, args.generation_batch_size)
+                ),
                 gpu_memory_utilization=args.vllm_gpu_memory_utilization,
                 execution_mode=args.vllm_execution_mode,
                 attention_backend=args.vllm_attention_backend,
                 flash_attn_version=args.vllm_flash_attn_version,
                 hlm_attention_impl=args.vllm_hlm_attention_impl,
                 model_family=args.vllm_model_family,
+                **native_vllm_speculative_kwargs(args),
             )
             model = None
             tokenizer = inferencer.tokenizer
@@ -515,13 +526,16 @@ def _write_or_validate_run_manifest(
                     args.vllm_max_model_len if args.vllm_max_model_len > 0 else args.seq_length + 2
                 ),
                 "max_num_seqs": max(args.score_batch_size, args.generation_batch_size),
+                "scheduler_queue_size": native_vllm_scheduler_queue_size(
+                    args, max(args.score_batch_size, args.generation_batch_size)
+                ),
                 "execution_mode": args.vllm_execution_mode,
                 "gpu_memory_utilization": args.vllm_gpu_memory_utilization,
                 "attention_backend": args.vllm_attention_backend,
                 "flash_attn_version": args.vllm_flash_attn_version,
                 "hlm_attention_impl": args.vllm_hlm_attention_impl,
                 "prefix_caching": False,
-                "speculative_decoding": False,
+                **native_vllm_speculative_manifest(args),
             }
             if args.hf_backend == NATIVE_VLLM_BACKEND
             else None
@@ -796,7 +810,11 @@ def main() -> None:
             available_modes = [mode for mode, items in pending_by_mode.items() if items]
             mode = max(available_modes, key=lambda name: pending_by_mode[name][0].estimated_cost)
             batch_limit = (
-                args.generation_batch_size if mode == "generation" else args.score_batch_size
+                native_vllm_scheduler_queue_size(args, args.generation_batch_size)
+                if mode == "generation" and args.hf_backend == NATIVE_VLLM_BACKEND
+                else (
+                    args.generation_batch_size if mode == "generation" else args.score_batch_size
+                )
             )
             works = [
                 pending_by_mode[mode].popleft()

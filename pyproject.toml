@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a11"
+version = "0.1.0a12"
 description = "Reproducible vLLM evaluation for OLMo and NCP OLMo"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -65,6 +65,7 @@ ncp-olmo-eval-prepare = "ncp_olmo_eval.prepare_cli:main"
 ncp-olmo-eval-task = "ncp_olmo_eval.task_runner:main"
 ncp-olmo-eval-assets = "ncp_olmo_eval.assets:main"
 ncp-olmo-eval-runtime-smoke = "ncp_olmo_eval.runtime_smoke:main"
+ncp-olmo-eval-dflash-benchmark = "ncp_olmo_eval.ncp_dflash_vllm_benchmark:main"
 
 [project.entry-points."vllm.general_plugins"]
 ncp_olmo = "ncp_olmo_eval.vllm_plugin.plugin:register"

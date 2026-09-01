@@ -16,6 +16,8 @@ from ncp_olmo_eval.inference import SamplingParams
 from ncp_olmo_eval.native_vllm_inference import (
     NativeVLLMInferencer,
     native_vllm_max_model_len,
+    native_vllm_scheduler_queue_size,
+    native_vllm_speculative_manifest,
     prepare_native_vllm_model,
     validate_native_vllm_args,
 )
@@ -83,6 +85,27 @@ def _inferencer(tmp_path: Path) -> tuple[NativeVLLMInferencer, _Engine]:
     return inferencer, engine
 
 
+def _draft_checkpoint(tmp_path: Path) -> Path:
+    draft = tmp_path / "draft"
+    draft.mkdir()
+    (draft / "config.json").write_text(
+        json.dumps(
+            {
+                "model_type": "conceptlm_dflash",
+                "proposal_method": "path_selector",
+                "hlm_conditioning": "causal_residual",
+                "concept_chunk_size": 4,
+                "target_layer_ids": [1, 4, 7, 10, 13],
+                "block_size": 16,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (draft / "model.safetensors").write_bytes(b"fixture")
+    return draft
+
+
 def test_core88_engine_capacity_covers_scoring_and_generation_batches() -> None:
     assert (
         _max_inference_batch_size(SimpleNamespace(score_batch_size=8, generation_batch_size=1)) == 8
@@ -107,11 +130,7 @@ def test_core_pool_validates_only_the_selected_backend(
             (batch_size, processes_per_gpu)
         ),
     )
-    monkeypatch.setattr(
-        core_native_pool,
-        "validate_lmdeploy_args",
-        reject_lmdeploy,
-    )
+    monkeypatch.setattr(core_native_pool, "validate_lmdeploy_args", reject_lmdeploy)
     monkeypatch.setattr(core_native_pool, "_file_sha256", lambda _path: "sealed-summary")
     args = SimpleNamespace(
         score_batch_size=8,
@@ -142,6 +161,12 @@ def test_core_pool_validates_only_the_selected_backend(
     core_native_pool._validate_args(args, plan)
 
     assert native_calls == [(8, 1)]
+    assert native_vllm_scheduler_queue_size(
+        SimpleNamespace(vllm_scheduler_queue_size=32), 8
+    ) == 32
+    assert native_vllm_scheduler_queue_size(
+        SimpleNamespace(vllm_scheduler_queue_size=0), 8
+    ) == 8
 
 
 def test_native_vllm_generation_preserves_local_completion_schema(tmp_path: Path) -> None:
@@ -184,13 +209,70 @@ def test_native_vllm_generation_batches_preserve_request_seeds(tmp_path: Path) -
         ["first", "second"],
         [
             SamplingParams(max_tokens=8, temperature=0.6, seed=41),
-            SamplingParams(max_tokens=16, temperature=0.7, seed=42),
+            SamplingParams(
+                max_tokens=16,
+                temperature=0.7,
+                seed=42,
+                ignore_eos=True,
+            ),
         ],
     )
 
     assert [completion.text for completion in completions] == ["answer-0", "answer-1"]
     assert [parameters["seed"] for parameters in engine.calls[0][1]] == [41, 42]
     assert [parameters["max_tokens"] for parameters in engine.calls[0][1]] == [8, 16]
+    assert [parameters["ignore_eos"] for parameters in engine.calls[0][1]] == [
+        False,
+        True,
+    ]
+
+
+def test_native_vllm_continuous_queue_can_exceed_active_batch(tmp_path: Path) -> None:
+    engine = _Engine()
+    inferencer = NativeVLLMInferencer(
+        model_path=tmp_path,
+        max_model_len=32,
+        seed=42,
+        max_batch_size=2,
+        scheduler_queue_size=4,
+        engine=engine,
+        sampling_params_factory=lambda **kwargs: kwargs,
+    )
+    prompts = ["first", "second", "third", "fourth"]
+
+    completions = inferencer.generate_batch(
+        prompts,
+        [SamplingParams(max_tokens=8, temperature=0.0, seed=42 + index) for index in range(4)],
+    )
+
+    assert len(completions) == 4
+    assert len(engine.calls[0][0]) == 4
+    assert inferencer.runtime_metadata["max_num_seqs"] == 2
+    assert inferencer.runtime_metadata["scheduler_queue_size"] == 4
+    assert inferencer.runtime_metadata["continuous_batching_enabled"] is True
+    assert (
+        inferencer.runtime_metadata["continuous_batching_status"]
+        == "experimental_request_local_state"
+    )
+
+
+def test_native_vllm_rejects_queue_above_configured_limit(tmp_path: Path) -> None:
+    engine = _Engine()
+    inferencer = NativeVLLMInferencer(
+        model_path=tmp_path,
+        max_model_len=32,
+        seed=42,
+        max_batch_size=2,
+        scheduler_queue_size=3,
+        engine=engine,
+        sampling_params_factory=lambda **kwargs: kwargs,
+    )
+
+    with pytest.raises(ValueError, match="request queue exceeds scheduler_queue_size"):
+        inferencer.generate_batch(
+            ["first", "second", "third", "fourth"],
+            [SamplingParams(max_tokens=8, temperature=0.0)] * 4,
+        )
 
 
 def test_native_vllm_records_tensor_parallel_engine_topology(tmp_path: Path) -> None:
@@ -204,6 +286,78 @@ def test_native_vllm_records_tensor_parallel_engine_topology(tmp_path: Path) -> 
     )
 
     assert inferencer.runtime_metadata["tensor_parallel_size"] == 2
+
+
+def test_native_vllm_records_correctness_gated_dflash_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CONCEPTLM_DFLASH_ATTENTION_BACKEND", "flash_varlen")
+    draft = _draft_checkpoint(tmp_path)
+    inferencer = NativeVLLMInferencer(
+        model_path=tmp_path,
+        max_model_len=8192,
+        seed=42,
+        speculative_draft_model=draft,
+        speculative_num_tokens=16,
+        engine=_Engine(),
+        sampling_params_factory=lambda **kwargs: kwargs,
+    )
+
+    assert inferencer.runtime_metadata["speculative_decoding"] is True
+    assert inferencer.runtime_metadata["speculative_method"] == "ncp_dflash_vllm_0_13"
+    assert inferencer.runtime_metadata["speculative_verification_mode"] == (
+        "sequential_exact"
+    )
+    assert inferencer.runtime_metadata["speculative_vllm_version"] == "0.13.0"
+    assert inferencer.runtime_metadata["speculative_draft_model"] == str(draft.resolve())
+    assert (
+        inferencer.runtime_metadata["speculative_draft_attention_backend"]
+        == "flash_varlen"
+    )
+    assert inferencer.runtime_metadata["speculative_correctness_gate"] == (
+        "exact_greedy_token_match_required"
+    )
+
+
+def test_native_vllm_manifest_seals_dflash_identity(tmp_path: Path) -> None:
+    draft = _draft_checkpoint(tmp_path)
+    args = SimpleNamespace(
+        vllm_speculative_draft_model=str(draft),
+        vllm_speculative_num_tokens=8,
+        vllm_speculative_telemetry_path="",
+        vllm_speculative_verification_mode="segmented_kv_approx",
+    )
+
+    manifest = native_vllm_speculative_manifest(args)
+
+    assert manifest["speculative_decoding"] is True
+    assert manifest["speculative_draft_model"] == str(draft.resolve())
+    assert manifest["speculative_num_tokens"] == 8
+    assert manifest["speculative_verification_mode"] == "segmented_kv_approx"
+    assert manifest["speculative_output_contract"] == "approximate"
+    assert manifest["speculative_correctness_gate"] == "matched_downstream_score_ab_required"
+    assert manifest["speculative_draft_identity"]["config_sha256"]
+    assert manifest["speculative_draft_identity"]["weights_size"] > 0
+
+
+def test_native_vllm_marks_segmented_cache_mode_as_approximate(tmp_path: Path) -> None:
+    draft = _draft_checkpoint(tmp_path)
+    inferencer = NativeVLLMInferencer(
+        model_path=tmp_path,
+        max_model_len=8192,
+        seed=42,
+        speculative_draft_model=draft,
+        speculative_num_tokens=16,
+        speculative_verification_mode="transactional_exact",
+        engine=_Engine(),
+        sampling_params_factory=lambda **kwargs: kwargs,
+    )
+
+    assert inferencer.speculative_verification_mode == "segmented_kv_approx"
+    assert inferencer.runtime_metadata["speculative_output_contract"] == "approximate"
+    assert inferencer.runtime_metadata["speculative_correctness_gate"] == (
+        "matched_downstream_score_ab_required"
+    )
 
 
 def test_native_vllm_scores_every_continuation_token_from_prompt_logprobs(tmp_path: Path) -> None:
@@ -354,6 +508,24 @@ def test_native_vllm_contract_requires_explicit_bounded_batch_opt_in() -> None:
     args.allow_unverified_native_vllm = False
     with pytest.raises(ValueError, match="allow-unverified"):
         validate_native_vllm_args(args, batch_size=1, processes_per_gpu=1)
+
+
+def test_native_vllm_contract_validates_dflash_checkpoint(tmp_path: Path) -> None:
+    draft = _draft_checkpoint(tmp_path)
+    args = SimpleNamespace(
+        hf_backend="native_vllm",
+        allow_unverified_native_vllm=True,
+        vllm_max_model_len=8192,
+        vllm_gpu_memory_utilization=0.85,
+        vllm_model_family="conceptlm",
+        vllm_speculative_draft_model=str(draft),
+        vllm_speculative_num_tokens=16,
+    )
+
+    validate_native_vllm_args(args, batch_size=8, processes_per_gpu=1)
+    (draft / "model.safetensors").unlink()
+    with pytest.raises(ValueError, match="missing model.safetensors"):
+        validate_native_vllm_args(args, batch_size=8, processes_per_gpu=1)
 
 
 def _native_runtime_config() -> dict[str, object]:

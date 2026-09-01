@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.0a12
+
+- Add the correctness-gated NCP DFlash proposer and vLLM 0.13 model-runner
+  adapter without patching installed vLLM files.
+- Add target/draft A/B benchmarking with exact and explicitly approximate
+  verification modes, immutable artifact binding, speed gates, GPU-memory
+  evidence, and proposal/rejection telemetry.
+- Extend model registration with a sealed draft identity and comparison
+  artifact. Formal speculative inference fails closed until the artifact
+  covers at least eight prompts and 1,024 forced tokens at seed 42.
+- Route verified speculative registrations through GSM8K and Core88 task specs,
+  propagate their proven generation batch size, and reject SciQ/RULER/HELMET
+  speculative use.
+- Add continuous scheduler-queue support and request-local target state
+  transactions needed for batched DFlash proposal and rejection.
+- Document the source integration's known exact-parity limitation: exact modes
+  remain fail-closed diagnostic gates, while the evidenced tuned path is an
+  explicitly approximate registration requiring matched downstream quality
+  A/B.
+
 ## 0.1.0a11
 
 - Add standalone SciQ inference, scoring, status validation, and final result

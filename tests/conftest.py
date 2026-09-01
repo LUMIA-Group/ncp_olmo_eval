@@ -15,5 +15,16 @@ if importlib.util.find_spec("torch") is None:
             "unit/test_helmet_protocol.py",
             "unit/test_long_context_protocol.py",
             "unit/test_native_vllm_inference.py",
+            "vllm_plugin/test_model_transaction.py",
+            "vllm_plugin/test_ncp_dflash_proposer.py",
+            "vllm_plugin/test_ncp_dflash_state.py",
+            "vllm_plugin/test_state.py",
+        ]
+    )
+if importlib.util.find_spec("vllm") is None:
+    collect_ignore.extend(
+        [
+            "vllm_plugin/test_model_transaction.py",
+            "vllm_plugin/test_ncp_dflash_model_runner.py",
         ]
     )
