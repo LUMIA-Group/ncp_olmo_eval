@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0a13
 
 - Seal the complete target-plus-DFlash operating point into every comparison
   artifact and registration, including active batch size, scheduler queue,

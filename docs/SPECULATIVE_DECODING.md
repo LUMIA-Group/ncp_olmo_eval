@@ -1,9 +1,12 @@
 # NCP DFlash speculative decoding
 
-Version 0.1.0a12 adds an opt-in NCP DFlash path for NCP OLMo on the pinned
+Version 0.1.0a12 added an opt-in NCP DFlash path for NCP OLMo on the pinned
 vLLM 0.13.0 runtime. It uses vLLM's upstream speculative scheduler and
 rejection sampler, but replaces the n-gram proposer with the NCP DFlash draft
 model. Installed vLLM files are not patched.
+
+Version 0.1.0a13 additionally seals and replays the full batch, scheduler
+queue, adaptive draft-width, target-runtime, and draft-runtime operating point.
 
 This path is fail-closed:
 
