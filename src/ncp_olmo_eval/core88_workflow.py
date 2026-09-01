@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .source_identity import source_state
-
+from .dflash_contract import validate_dflash_operating_point
 from .lmdeploy_inference import lmdeploy_engine_policy
+from .source_identity import source_state
 
 SCHEMA_VERSION = "core88-standalone-gsm8k-workflow-v2"
 WORKFLOW_STATUS = "CORE88_STANDALONE_GSM8K_WORKFLOW_READY"
@@ -227,6 +227,10 @@ def _gsm8k_protocol(
     backend: str = "native_vllm",
     *,
     lmdeploy_cache_max_entry_count: float = 0.8,
+    batch_size: int = 8,
+    scheduler_queue_size: int = 0,
+    max_model_len: int = 2048,
+    speculative_operating_point: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if backend not in {"native_vllm", "lmdeploy"}:
         raise ValueError(f"unsupported Core88 GSM8K backend: {backend}")
@@ -246,9 +250,11 @@ def _gsm8k_protocol(
         "sampling_seed": GSM8K_SEED,
         "gpu_count": 8,
         "samples_per_doc": 1,
-        "batch_size": 8,
+        "batch_size": batch_size,
+        "scheduler_queue_size": scheduler_queue_size or batch_size,
         "limit": 0,
-        "max_model_len": 2048,
+        "max_model_len": max_model_len,
+        "vllm_speculative_operating_point": speculative_operating_point,
     }
     if backend == "lmdeploy":
         # This legacy schema field records the model's configured context
@@ -327,6 +333,11 @@ def create_workflow(
     row_chunk_size: int = 1,
     seq_length: int = 2048,
     vllm_max_model_len: int = 0,
+    vllm_scheduler_queue_size: int = 0,
+    vllm_speculative_operating_point: dict[str, Any] | None = None,
+    gsm8k_batch_size: int = 8,
+    gsm8k_scheduler_queue_size: int = 0,
+    gsm8k_max_model_len: int = 2048,
     lmdeploy_cache_max_entry_count: float = 0.8,
     diagnostic_planless: bool = False,
 ) -> dict[str, Any]:
@@ -371,6 +382,35 @@ def create_workflow(
             raise ValueError(f"Core88 {name} must be positive")
     if vllm_max_model_len < 0:
         raise ValueError("Core88 vllm_max_model_len cannot be negative")
+    if vllm_scheduler_queue_size < 0:
+        raise ValueError("Core88 vllm_scheduler_queue_size cannot be negative")
+    if vllm_scheduler_queue_size and vllm_scheduler_queue_size < generation_batch_size:
+        raise ValueError("Core88 scheduler queue must be at least generation batch size")
+    if gsm8k_batch_size <= 0:
+        raise ValueError("Core88 GSM8K batch size must be positive")
+    if gsm8k_scheduler_queue_size and gsm8k_scheduler_queue_size < gsm8k_batch_size:
+        raise ValueError("Core88 GSM8K scheduler queue must be at least batch size")
+    if gsm8k_max_model_len <= 0:
+        raise ValueError("Core88 GSM8K max_model_len must be positive")
+    if vllm_speculative_operating_point is not None:
+        vllm_speculative_operating_point = validate_dflash_operating_point(
+            vllm_speculative_operating_point
+        )
+        expected_batch = int(vllm_speculative_operating_point["max_num_seqs"])
+        expected_queue = int(vllm_speculative_operating_point["scheduler_queue_size"])
+        expected_max_model_len = int(vllm_speculative_operating_point["max_model_len"])
+        if score_batch_size != expected_batch or generation_batch_size != expected_batch:
+            raise ValueError("Core88 batch sizes differ from sealed DFlash operating point")
+        if (vllm_scheduler_queue_size or generation_batch_size) != expected_queue:
+            raise ValueError("Core88 scheduler queue differs from sealed DFlash operating point")
+        if vllm_max_model_len != expected_max_model_len:
+            raise ValueError("Core88 max_model_len differs from sealed DFlash operating point")
+        if gsm8k_batch_size != expected_batch:
+            raise ValueError("Core88 GSM8K batch differs from sealed DFlash operating point")
+        if (gsm8k_scheduler_queue_size or gsm8k_batch_size) != expected_queue:
+            raise ValueError("Core88 GSM8K queue differs from sealed DFlash operating point")
+        if gsm8k_max_model_len != expected_max_model_len:
+            raise ValueError("Core88 GSM8K max_model_len differs from sealed DFlash operating point")
     if not 0.0 < lmdeploy_cache_max_entry_count < 1.0:
         raise ValueError("Core88 LMDeploy cache fraction must be in (0, 1)")
     if vllm_model_family == "auto" and vllm_runtime_config is not None:
@@ -426,6 +466,8 @@ def create_workflow(
         "row_chunk_size": row_chunk_size,
         "seq_length": seq_length,
         "vllm_max_model_len": vllm_max_model_len,
+        "vllm_scheduler_queue_size": vllm_scheduler_queue_size,
+        "vllm_speculative_operating_point": vllm_speculative_operating_point,
     }
     if hf_backend == "lmdeploy":
         core_protocol.update(
@@ -483,6 +525,10 @@ def create_workflow(
         "gsm8k_protocol": _gsm8k_protocol(
             "lmdeploy" if hf_backend == "lmdeploy" else "native_vllm",
             lmdeploy_cache_max_entry_count=lmdeploy_cache_max_entry_count,
+            batch_size=gsm8k_batch_size,
+            scheduler_queue_size=gsm8k_scheduler_queue_size,
+            max_model_len=gsm8k_max_model_len,
+            speculative_operating_point=vllm_speculative_operating_point,
         ),
     }
     _write_json_atomic(output_root / "workflow.json", payload)
@@ -657,6 +703,8 @@ def validate_core_run_manifest(workflow: dict[str, Any], manifest: dict[str, Any
             "max_num_seqs": max(
                 int(protocol["score_batch_size"]), int(protocol["generation_batch_size"])
             ),
+            "scheduler_queue_size": protocol.get("vllm_scheduler_queue_size")
+            or max(int(protocol["score_batch_size"]), int(protocol["generation_batch_size"])),
         }
         for field, expected in native_checks.items():
             if native.get(field) != expected:
@@ -664,6 +712,65 @@ def validate_core_run_manifest(workflow: dict[str, Any], manifest: dict[str, Any
                     f"Core native-vLLM {field} differs from workflow: "
                     f"{native.get(field)!r} != {expected!r}"
                 )
+        speculative_point = protocol.get("vllm_speculative_operating_point")
+        if isinstance(speculative_point, dict):
+            point_checks = {
+                "vllm_use_v2_model_runner": speculative_point[
+                    "vllm_use_v2_model_runner"
+                ],
+                "execution_mode": speculative_point["execution_mode"],
+                "gpu_memory_utilization": speculative_point["gpu_memory_utilization"],
+                "attention_backend": speculative_point["attention_backend"],
+                "flash_attn_version": speculative_point["flash_attn_version"],
+                "hlm_attention_impl": speculative_point["hlm_attention_impl"],
+                "speculative_verification_mode": speculative_point[
+                    "speculative_verification_mode"
+                ],
+                "speculative_num_tokens": speculative_point["speculative_num_tokens"],
+                "speculative_draft_attention_backend": speculative_point[
+                    "draft_attention_backend"
+                ],
+                "speculative_context_kv_cache": speculative_point["context_kv_cache"],
+                "speculative_sparse_context_projection": speculative_point[
+                    "sparse_context_projection"
+                ],
+                "speculative_min_eligible_batch": speculative_point[
+                    "min_eligible_batch"
+                ],
+                "speculative_min_proposal_tokens_per_row": speculative_point[
+                    "min_proposal_tokens_per_row"
+                ],
+                "speculative_min_proposal_tokens_per_batch": speculative_point[
+                    "min_proposal_tokens_per_batch"
+                ],
+                "speculative_runtime_block_size": speculative_point["runtime_block_size"],
+                "speculative_active_batch_widths": speculative_point[
+                    "active_batch_widths"
+                ],
+                "speculative_dynamic_runtime_block_size": speculative_point[
+                    "dynamic_runtime_block_size"
+                ],
+                "speculative_runtime_layer_count": speculative_point[
+                    "runtime_layer_count"
+                ],
+                "speculative_runtime_local_mixer": speculative_point[
+                    "runtime_local_mixer"
+                ],
+                "speculative_mixer_compile_mode": speculative_point[
+                    "mixer_compile_mode"
+                ],
+                "speculative_chunk_size": speculative_point["chunk_size"],
+                "speculative_target_layers": speculative_point["target_layers"],
+                "speculative_telemetry_flush_interval": speculative_point[
+                    "telemetry_flush_interval"
+                ],
+            }
+            for field, expected in point_checks.items():
+                if native.get(field) != expected:
+                    raise RuntimeError(
+                        f"Core sealed DFlash {field} differs from workflow: "
+                        f"{native.get(field)!r} != {expected!r}"
+                    )
     if protocol.get("hf_backend") == "lmdeploy":
         lmdeploy = manifest.get("lmdeploy_config")
         if not isinstance(lmdeploy, dict):
@@ -808,6 +915,59 @@ def seal_companion(
                     f"GSM8K LMDeploy {field} changed: "
                     f"{lmdeploy_runtime.get(field)!r} != {expected!r}"
                 )
+    speculative_point = protocol.get("vllm_speculative_operating_point")
+    if isinstance(speculative_point, dict):
+        speculative_checks = {
+            "batch_size": speculative_point["max_num_seqs"],
+            "max_num_seqs": speculative_point["max_num_seqs"],
+            "scheduler_queue_size": speculative_point["scheduler_queue_size"],
+            "max_model_len": speculative_point["max_model_len"],
+            "gpu_memory_utilization": speculative_point["gpu_memory_utilization"],
+            "execution_mode": speculative_point["execution_mode"],
+            "attention_backend": speculative_point["attention_backend"],
+            "flash_attn_version": speculative_point["flash_attn_version"],
+            "hlm_attention_impl": speculative_point["hlm_attention_impl"],
+            "vllm_use_v2_model_runner": speculative_point["vllm_use_v2_model_runner"],
+            "speculative_verification_mode": speculative_point[
+                "speculative_verification_mode"
+            ],
+            "speculative_num_tokens": speculative_point["speculative_num_tokens"],
+            "speculative_draft_attention_backend": speculative_point[
+                "draft_attention_backend"
+            ],
+            "speculative_context_kv_cache": speculative_point["context_kv_cache"],
+            "speculative_sparse_context_projection": speculative_point[
+                "sparse_context_projection"
+            ],
+            "speculative_min_eligible_batch": speculative_point["min_eligible_batch"],
+            "speculative_min_proposal_tokens_per_row": speculative_point[
+                "min_proposal_tokens_per_row"
+            ],
+            "speculative_min_proposal_tokens_per_batch": speculative_point[
+                "min_proposal_tokens_per_batch"
+            ],
+            "speculative_runtime_block_size": speculative_point["runtime_block_size"],
+            "speculative_active_batch_widths": speculative_point[
+                "active_batch_widths"
+            ],
+            "speculative_dynamic_runtime_block_size": speculative_point[
+                "dynamic_runtime_block_size"
+            ],
+            "speculative_runtime_layer_count": speculative_point["runtime_layer_count"],
+            "speculative_runtime_local_mixer": speculative_point["runtime_local_mixer"],
+            "speculative_mixer_compile_mode": speculative_point["mixer_compile_mode"],
+            "speculative_chunk_size": speculative_point["chunk_size"],
+            "speculative_target_layers": speculative_point["target_layers"],
+            "speculative_telemetry_flush_interval": speculative_point[
+                "telemetry_flush_interval"
+            ],
+        }
+        for field, expected in speculative_checks.items():
+            if aggregate.get(field) != expected:
+                raise RuntimeError(
+                    f"GSM8K sealed DFlash {field} changed: "
+                    f"{aggregate.get(field)!r} != {expected!r}"
+                )
     effective_max_model_len = validate_gsm8k_max_model_len(protocol, aggregate)
     aggregate_checks = {
         "task": protocol["task"],
@@ -822,6 +982,7 @@ def seal_companion(
         "prompt_sha256": protocol["prompt_sha256"],
         "batch_size": protocol["batch_size"],
         "max_num_seqs": protocol["batch_size"],
+        "scheduler_queue_size": protocol.get("scheduler_queue_size", protocol["batch_size"]),
         "gpu_count": protocol["gpu_count"],
     }
     if backend == "lmdeploy":
@@ -899,6 +1060,7 @@ def parse_args() -> argparse.Namespace:
     create.add_argument("--row-chunk-size", type=int, default=1)
     create.add_argument("--seq-length", type=int, default=2048)
     create.add_argument("--vllm-max-model-len", type=int, default=0)
+    create.add_argument("--vllm-scheduler-queue-size", type=int, default=0)
     create.add_argument("--lmdeploy-cache-max-entry-count", type=float, default=0.8)
     create.add_argument(
         "--diagnostic-planless",
@@ -952,6 +1114,7 @@ def main() -> None:
             row_chunk_size=args.row_chunk_size,
             seq_length=args.seq_length,
             vllm_max_model_len=args.vllm_max_model_len,
+            vllm_scheduler_queue_size=args.vllm_scheduler_queue_size,
             lmdeploy_cache_max_entry_count=args.lmdeploy_cache_max_entry_count,
             diagnostic_planless=args.diagnostic_planless,
         )

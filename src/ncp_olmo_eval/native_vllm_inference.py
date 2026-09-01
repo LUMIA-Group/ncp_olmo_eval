@@ -278,6 +278,51 @@ def native_vllm_speculative_manifest(args: argparse.Namespace) -> dict[str, Any]
             if exact_mode
             else "matched_downstream_score_ab_required"
         ),
+        "speculative_draft_attention_backend": os.environ.get(
+            "CONCEPTLM_DFLASH_ATTENTION_BACKEND", "sdpa"
+        ),
+        "speculative_context_kv_cache": (
+            os.environ.get("CONCEPTLM_DFLASH_CONTEXT_KV_CACHE", "0") == "1"
+        ),
+        "speculative_sparse_context_projection": (
+            os.environ.get("CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION", "0") == "1"
+        ),
+        "speculative_min_eligible_batch": int(
+            os.environ.get("CONCEPTLM_DFLASH_MIN_ELIGIBLE_BATCH", "1")
+        ),
+        "speculative_min_proposal_tokens_per_row": int(
+            os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW", "1")
+        ),
+        "speculative_min_proposal_tokens_per_batch": int(
+            os.environ.get("CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH", "1")
+        ),
+        "speculative_runtime_block_size": int(
+            os.environ.get("CONCEPTLM_DFLASH_RUNTIME_BLOCK_SIZE", "0")
+        ),
+        "speculative_active_batch_widths": os.environ.get(
+            "CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS", ""
+        ),
+        "speculative_dynamic_runtime_block_size": (
+            os.environ.get("CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE", "0") == "1"
+        ),
+        "speculative_runtime_layer_count": int(
+            os.environ.get("CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT", "0")
+        ),
+        "speculative_runtime_local_mixer": os.environ.get(
+            "CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER", "full"
+        ),
+        "speculative_mixer_compile_mode": os.environ.get(
+            "CONCEPTLM_DFLASH_MIXER_COMPILE_MODE", "default"
+        ),
+        "speculative_chunk_size": int(
+            os.environ.get("CONCEPTLM_DFLASH_CHUNK_SIZE", "4")
+        ),
+        "speculative_target_layers": os.environ.get(
+            "CONCEPTLM_DFLASH_TARGET_LAYERS", "1,4,7,10,13"
+        ),
+        "speculative_telemetry_flush_interval": int(
+            os.environ.get("CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL", "8")
+        ),
     }
 
 
@@ -686,6 +731,7 @@ class NativeVLLMInferencer:
             "tensor_parallel_size": self.tensor_parallel_size,
             "pipeline_parallel_size": 1,
             "execution_mode": self.execution_mode,
+            "vllm_use_v2_model_runner": os.environ.get("VLLM_USE_V2_MODEL_RUNNER", "auto"),
             "prefix_caching": False,
             "speculative_decoding": bool(self.speculative_draft_model),
             "speculative_method": (
@@ -762,6 +808,21 @@ class NativeVLLMInferencer:
                 os.environ.get("CONCEPTLM_DFLASH_MIXER_COMPILE_MODE", "default")
                 if self.speculative_draft_model
                 else "disabled"
+            ),
+            "speculative_chunk_size": (
+                int(os.environ.get("CONCEPTLM_DFLASH_CHUNK_SIZE", "4"))
+                if self.speculative_draft_model
+                else 0
+            ),
+            "speculative_target_layers": (
+                os.environ.get("CONCEPTLM_DFLASH_TARGET_LAYERS", "1,4,7,10,13")
+                if self.speculative_draft_model
+                else ""
+            ),
+            "speculative_telemetry_flush_interval": (
+                int(os.environ.get("CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL", "8"))
+                if self.speculative_draft_model
+                else 0
             ),
             "speculative_output_contract": (
                 (

@@ -31,6 +31,10 @@ from .core_native_contract import (
     CORE88_LOCAL_DISPATCH,
     CORE88_PLAN_SCHEMA,
 )
+from .dflash_contract import (
+    dflash_operating_point_env,
+    validate_dflash_operating_point,
+)
 from .long_context_protocol import HELMET_SWEEP_INPUT_LENGTHS, RULER_SEQUENCE_LENGTHS
 from .native_vllm_inference import (
     NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES,
@@ -465,10 +469,34 @@ def _validate_dflash_verification(
         int(contract.get("seed", -1)) != DEFAULT_GLOBAL_SEED
         or int(contract.get("prompt_count", -1)) < 8
         or int(contract.get("max_new_tokens", -1)) < 128
-        or int(contract.get("batch_size", -1)) != 1
+        or not 1 <= int(contract.get("batch_size", -1)) <= 8
+        or int(contract.get("scheduler_queue_size", -1))
+        < int(contract.get("batch_size", -1))
         or contract.get("ignore_eos") is not True
     ):
         raise EvaluationError("NCP DFlash correctness artifact 的 benchmark 合同不完整")
+    raw_operating_point = verification.get("speculative_operating_point")
+    if not isinstance(raw_operating_point, dict):
+        raise EvaluationError(
+            "NCP DFlash correctness artifact 缺少完整 speculative operating point；"
+            "请使用当前版本重新生成 target/spec comparison"
+        )
+    try:
+        operating_point = validate_dflash_operating_point(
+            raw_operating_point, benchmark_contract=contract
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise EvaluationError(f"NCP DFlash operating point 无效：{error}") from error
+    if operating_point["speculative_verification_mode"] != verification_mode:
+        raise EvaluationError("NCP DFlash operating point 的 verification mode 不匹配")
+    if float(operating_point["gpu_memory_utilization"]) != float(
+        contract.get("gpu_memory_utilization", -1)
+    ):
+        raise EvaluationError("NCP DFlash operating point 的 GPU memory contract 不匹配")
+    if str(operating_point["vllm_use_v2_model_runner"]) != str(
+        contract.get("vllm_use_v2_model_runner", "")
+    ):
+        raise EvaluationError("NCP DFlash operating point 的 vLLM model-runner contract 不匹配")
     target_identity = verification.get("target_model_identity")
     if not isinstance(target_identity, dict) or Path(
         str(target_identity.get("source_model", ""))
@@ -501,6 +529,7 @@ def _validate_dflash_verification(
             throughput_speedup if math.isfinite(throughput_speedup) else None
         ),
         "benchmark_contract": contract,
+        "speculative_operating_point": operating_point,
     }
 
 
@@ -870,9 +899,25 @@ def _protocol_for_registration(
     contract = verification.get("benchmark_contract") if isinstance(verification, dict) else None
     if not isinstance(contract, dict):
         raise EvaluationError("NCP DFlash 注册缺少 correctness artifact benchmark 合同")
-    verified_batch_size = int(contract.get("batch_size", -1))
+    raw_operating_point = verification.get("speculative_operating_point")
+    if not isinstance(raw_operating_point, dict):
+        raise EvaluationError("NCP DFlash 注册缺少封存的 speculative operating point")
+    try:
+        operating_point = validate_dflash_operating_point(
+            raw_operating_point, benchmark_contract=contract
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise EvaluationError(f"NCP DFlash 注册的 operating point 无效：{error}") from error
+    verified_batch_size = int(operating_point["max_num_seqs"])
+    scheduler_queue_size = int(operating_point["scheduler_queue_size"])
     if verified_batch_size <= 0:
         raise EvaluationError("NCP DFlash correctness artifact 缺少有效 batch size")
+    required_model_len = int(protocol.get("vllm_max_model_len", 0))
+    if int(operating_point["max_model_len"]) < required_model_len:
+        raise EvaluationError(
+            "NCP DFlash A/B 的 max_model_len 小于 benchmark 协议："
+            f"verified={operating_point['max_model_len']} required={required_model_len}"
+        )
     protocol["speculative_decoding"] = {
         "enabled": True,
         "draft_model": draft_model,
@@ -881,6 +926,11 @@ def _protocol_for_registration(
         ),
         "vllm_version": str(verification.get("vllm_version", "")),
         "verified_generation_batch_size": verified_batch_size,
+        "verified_scheduler_queue_size": scheduler_queue_size,
+        "continuous_batching_enabled": bool(
+            operating_point["continuous_batching_enabled"]
+        ),
+        "operating_point": operating_point,
         "output_contract": str(
             verification.get("speculative_output_contract", "target_exact")
         ),
@@ -894,7 +944,21 @@ def _protocol_for_registration(
         ),
     }
     if benchmark in {"gsm8k", "core88"}:
+        protocol["batch_size"] = verified_batch_size
         protocol["generation_batch_size"] = verified_batch_size
+        protocol["vllm_scheduler_queue_size"] = scheduler_queue_size
+        protocol["vllm_max_model_len"] = int(operating_point["max_model_len"])
+        protocol["vllm_gpu_memory_utilization"] = float(
+            operating_point["gpu_memory_utilization"]
+        )
+        protocol["vllm_execution_mode"] = str(operating_point["execution_mode"])
+        protocol["vllm_attention_backend"] = str(operating_point["attention_backend"])
+        protocol["vllm_flash_attn_version"] = int(
+            operating_point["flash_attn_version"]
+        )
+        protocol["vllm_hlm_attention_impl"] = str(
+            operating_point["hlm_attention_impl"]
+        )
     return protocol
 
 
@@ -1103,24 +1167,13 @@ def _base_launch_env(registration: dict[str, Any]) -> dict[str, str]:
                 ),
             }
         )
-        for name in (
-            "CONCEPTLM_DFLASH_ATTENTION_BACKEND",
-            "CONCEPTLM_DFLASH_CONTEXT_KV_CACHE",
-            "CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION",
-            "CONCEPTLM_DFLASH_MIN_ELIGIBLE_BATCH",
-            "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW",
-            "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH",
-            "CONCEPTLM_DFLASH_RUNTIME_BLOCK_SIZE",
-            "CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS",
-            "CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE",
-            "CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT",
-            "CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER",
-            "CONCEPTLM_DFLASH_MIXER_COMPILE_MODE",
-            "CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL",
-        ):
-            value = os.environ.get(name, "")
-            if value:
-                env[name] = value
+        raw_operating_point = verification.get("speculative_operating_point")
+        if not isinstance(raw_operating_point, dict):
+            raise EvaluationError("NCP DFlash 注册缺少封存的 speculative operating point")
+        try:
+            env.update(dflash_operating_point_env(raw_operating_point))
+        except (KeyError, TypeError, ValueError) as error:
+            raise EvaluationError(f"NCP DFlash operating point 无法生成环境：{error}") from error
     return env
 
 
@@ -1138,11 +1191,18 @@ def _speculative_cli_args(
     verification = registration.get("vllm_speculative_verification")
     if not isinstance(verification, dict):
         raise EvaluationError("NCP DFlash 注册缺少 correctness artifact 元数据")
+    raw_operating_point = verification.get("speculative_operating_point")
+    if not isinstance(raw_operating_point, dict):
+        raise EvaluationError("NCP DFlash 注册缺少封存的 speculative operating point")
+    try:
+        operating_point = validate_dflash_operating_point(raw_operating_point)
+    except (KeyError, TypeError, ValueError) as error:
+        raise EvaluationError(f"NCP DFlash operating point 无效：{error}") from error
     return [
         f"--{option_prefix}speculative-draft-model",
         draft_model,
         f"--{option_prefix}speculative-num-tokens",
-        "16",
+        str(operating_point["speculative_num_tokens"]),
         f"--{option_prefix}speculative-telemetry-path",
         str(telemetry_path),
         f"--{option_prefix}speculative-verification-mode",
@@ -1202,18 +1262,38 @@ def _gsm8k_command(
         str(protocol["sampling_seed"]),
         "--batch-size",
         str(protocol.get("generation_batch_size", protocol["batch_size"])),
+        "--scheduler-queue-size",
+        str(
+            protocol.get(
+                "vllm_scheduler_queue_size",
+                protocol.get("generation_batch_size", protocol["batch_size"]),
+            )
+        ),
+        "--max-model-len",
+        str(protocol.get("vllm_max_model_len", 2048)),
+        "--gpu-memory-utilization",
+        str(protocol.get("vllm_gpu_memory_utilization", 0.85)),
+        "--execution-mode",
+        str(protocol.get("vllm_execution_mode", "eager")),
+        "--attention-backend",
+        str(protocol.get("vllm_attention_backend", "FLASH_ATTN")),
+        "--flash-attn-version",
+        str(protocol.get("vllm_flash_attn_version", 3)),
+        "--hlm-attention-impl",
+        str(protocol.get("vllm_hlm_attention_impl", "legacy_mixed")),
         "--resume",
     ]
     if registration.get("vllm_runtime_config"):
         argv.extend(["--runtime-config", str(registration["vllm_runtime_config"])])
     if registration.get("vllm_speculative_draft_model"):
         verification = registration["vllm_speculative_verification"]
+        operating_point = verification["speculative_operating_point"]
         argv.extend(
             [
                 "--speculative-draft-model",
                 str(registration["vllm_speculative_draft_model"]),
                 "--speculative-num-tokens",
-                "16",
+                str(operating_point["speculative_num_tokens"]),
                 "--speculative-verification-mode",
                 str(verification["speculative_verification_mode"]),
             ]
@@ -1425,23 +1505,35 @@ def _core_commands(
             "--worker-restarts", "1",
             "--worker-start-stagger-seconds", "2",
             "--seq-length", "2048",
-            "--score-batch-size", "8",
+            "--score-batch-size", str(protocol["batch_size"]),
             "--generation-batch-size",
             str(protocol.get("generation_batch_size", protocol["batch_size"])),
-            "--row-chunk-size", "8",
+            "--row-chunk-size", str(protocol["batch_size"]),
             "--pad-multiple", "128",
             "--progress-every", "100",
             "--limit-per-task", "0",
             "--generation-samples-cap", str(protocol["generation_samples_cap"]),
             "--max-gen-tokens-cap", "0",
             "--vllm-max-model-len", str(protocol["vllm_max_model_len"]),
+            "--vllm-scheduler-queue-size",
+            str(
+                protocol.get(
+                    "vllm_scheduler_queue_size",
+                    protocol.get("generation_batch_size", protocol["batch_size"]),
+                )
+            ),
             "--vllm-model-family", _model_family(registration),
             "--vllm-model-overlay-dir", str(core_root / f"model-overlay-m{machine_index}"),
-            "--vllm-gpu-memory-utilization", "0.85",
-            "--vllm-execution-mode", "eager",
-            "--vllm-attention-backend", "FLASH_ATTN",
-            "--vllm-flash-attn-version", "3",
-            "--vllm-hlm-attention-impl", "legacy_mixed",
+            "--vllm-gpu-memory-utilization",
+            str(protocol.get("vllm_gpu_memory_utilization", 0.85)),
+            "--vllm-execution-mode",
+            str(protocol.get("vllm_execution_mode", "eager")),
+            "--vllm-attention-backend",
+            str(protocol.get("vllm_attention_backend", "FLASH_ATTN")),
+            "--vllm-flash-attn-version",
+            str(protocol.get("vllm_flash_attn_version", 3)),
+            "--vllm-hlm-attention-impl",
+            str(protocol.get("vllm_hlm_attention_impl", "legacy_mixed")),
             "--allow-unverified-native-vllm",
             "--no-hf-align-dcp-runtime-config",
             "--verify-data-sha256",
@@ -1521,6 +1613,11 @@ def _create_core_workflow(
     from .core88_workflow import create_workflow
 
     protocol = _protocol_for_registration(registration, "core88")
+    gsm8k_protocol = _protocol_for_registration(registration, "gsm8k")
+    speculative = protocol.get("speculative_decoding")
+    operating_point = (
+        speculative.get("operating_point") if isinstance(speculative, dict) else None
+    )
     return create_workflow(
         output_root=attempt_root,
         repo_root=_repo_root(),
@@ -1550,6 +1647,27 @@ def _create_core_workflow(
         row_chunk_size=int(protocol["batch_size"]),
         seq_length=2048,
         vllm_max_model_len=int(protocol.get("vllm_max_model_len", 0)),
+        vllm_scheduler_queue_size=int(
+            protocol.get(
+                "vllm_scheduler_queue_size",
+                protocol.get("generation_batch_size", protocol["batch_size"]),
+            )
+        ),
+        vllm_speculative_operating_point=(
+            dict(operating_point) if isinstance(operating_point, dict) else None
+        ),
+        gsm8k_batch_size=int(
+            gsm8k_protocol.get("generation_batch_size", gsm8k_protocol["batch_size"])
+        ),
+        gsm8k_scheduler_queue_size=int(
+            gsm8k_protocol.get(
+                "vllm_scheduler_queue_size",
+                gsm8k_protocol.get(
+                    "generation_batch_size", gsm8k_protocol["batch_size"]
+                ),
+            )
+        ),
+        gsm8k_max_model_len=int(gsm8k_protocol.get("vllm_max_model_len", 2048)),
         lmdeploy_cache_max_entry_count=0.8,
     )
 

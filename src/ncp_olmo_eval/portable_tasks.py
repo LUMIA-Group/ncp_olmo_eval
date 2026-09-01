@@ -150,8 +150,10 @@ def run_gsm8k(args: argparse.Namespace) -> None:
                     1,
                     "--batch-size",
                     args.batch_size,
+                    "--scheduler-queue-size",
+                    args.scheduler_queue_size,
                     "--max-model-len",
-                    2048,
+                    args.max_model_len,
                     "--warmup-tokens",
                     2,
                     "--progress-every",
@@ -474,6 +476,13 @@ def _parser() -> argparse.ArgumentParser:
     gsm.add_argument("--fewshot-seed", type=int, default=42)
     gsm.add_argument("--sampling-seed", type=int, default=42)
     gsm.add_argument("--batch-size", type=int, default=8)
+    gsm.add_argument(
+        "--scheduler-queue-size",
+        type=int,
+        default=0,
+        help="requests submitted per vLLM call; zero uses batch-size",
+    )
+    gsm.add_argument("--max-model-len", type=int, default=2048)
     gsm.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     gsm.add_argument("--execution-mode", choices=("eager", "piecewise"), default="eager")
     gsm.add_argument("--attention-backend", default="FLASH_ATTN")

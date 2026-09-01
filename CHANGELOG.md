@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Seal the complete target-plus-DFlash operating point into every comparison
+  artifact and registration, including active batch size, scheduler queue,
+  draft width policy, model-runner selection, cache/mixer settings, and target
+  runtime controls. Legacy speculative comparison artifacts must be regenerated.
+- Preserve the verified batch-to-draft-width policy when emitting Core88 and
+  GSM8K tasks instead of replacing it with a hard-coded width of 16 or planner
+  environment variables.
+- Require continuous-batching A/B runs to submit at least one full scheduler
+  queue, and bind the same batch, queue, and runtime contract into formal
+  inference manifests and GSM8K aggregates.
+
 ## 0.1.0a12
 
 - Add the correctness-gated NCP DFlash proposer and vLLM 0.13 model-runner

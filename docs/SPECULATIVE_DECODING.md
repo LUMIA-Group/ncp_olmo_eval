@@ -16,6 +16,10 @@ This path is fail-closed:
   same vLLM 0.13.0 runtime;
 - the artifact must cover at least eight prompts and 1,024 forced generated
   tokens at seed 42;
+- the artifact seals the complete target-plus-draft operating point; old
+  comparison artifacts without this contract are rejected;
+- when the scheduler queue is larger than the active batch, the A/B must cover
+  at least one full queue so continuous admission is exercised directly;
 - exact modes must match target-only output token by token;
 - the approximate mode requires an explicit opt-in and remains a separate
   evaluation identity that requires matched downstream scoring;
@@ -54,22 +58,37 @@ Manifests always record the canonical name.
 
 ## Produce a correctness artifact
 
-Prepare a JSONL file with at least eight representative prompts in an
-`input` field. Use fresh output directories for every run.
+Prepare a JSONL file with representative prompts in an `input` field. Use
+fresh output directories for every run. The example below reproduces the
+validated batch/width policy: active batch 8, scheduler queue 32, speculative
+width 8, and adaptive widths `1:8,2:8,4:4,8:2`.
 
 ```bash
 export TARGET=/models/ncp-olmo-target
 export DRAFT=/models/ncp-dflash-draft
 export PROMPTS=/data/dflash-verification-prompts.jsonl
 export OUT=/shared/dflash-verification
+export VLLM_USE_V2_MODEL_RUNNER=0
+export CONCEPTLM_DFLASH_ATTENTION_BACKEND=flash_varlen
+export CONCEPTLM_DFLASH_CONTEXT_KV_CACHE=1
+export CONCEPTLM_DFLASH_SPARSE_CONTEXT_PROJECTION=1
+export CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS='1:8,2:8,4:4,8:2'
+export CONCEPTLM_DFLASH_DYNAMIC_RUNTIME_BLOCK_SIZE=1
+export CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT=5
+export CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER=full
+export CONCEPTLM_DFLASH_MIXER_COMPILE_MODE=default
+export CONCEPTLM_DFLASH_CHUNK_SIZE=4
+export CONCEPTLM_DFLASH_TARGET_LAYERS='1,4,7,10,13'
 
 ncp-olmo-eval-dflash-benchmark run \
   --mode target \
   --model "$TARGET" \
   --prompt-jsonl "$PROMPTS" \
   --output "$OUT/target" \
-  --limit 8 \
-  --batch-size 1 \
+  --limit 32 \
+  --batch-size 8 \
+  --scheduler-queue-size 32 \
+  --max-model-len 8192 \
   --max-new-tokens 128 \
   --ignore-eos \
   --seed 42
@@ -80,17 +99,21 @@ ncp-olmo-eval-dflash-benchmark run \
   --draft-model "$DRAFT" \
   --prompt-jsonl "$PROMPTS" \
   --output "$OUT/speculative" \
-  --limit 8 \
-  --batch-size 1 \
+  --limit 32 \
+  --batch-size 8 \
+  --scheduler-queue-size 32 \
+  --max-model-len 8192 \
   --max-new-tokens 128 \
   --ignore-eos \
   --seed 42 \
-  --speculative-verification-mode sequential_exact
+  --speculative-num-tokens 8 \
+  --speculative-verification-mode segmented_kv_approx
 
 ncp-olmo-eval-dflash-benchmark compare \
   --target-result "$OUT/target/benchmark.json" \
   --speculative-result "$OUT/speculative/benchmark.json" \
-  --output "$OUT/comparison.json"
+  --output "$OUT/comparison.json" \
+  --allow-output-divergence
 ```
 
 A passing parallel exact artifact additionally has to show
@@ -113,16 +136,17 @@ Omit `--vllm-speculative-allow-approximate` only when the supplied artifact is
 a genuinely passing exact artifact.  The flag never converts a failing exact
 artifact into an accepted one.
 
-The registration stores immutable target, draft, and comparison identities.
-If any referenced artifact changes, later commands stop and require a new
-registration version. The verified active batch size is propagated to the
-GSM8K/Core88 generation tasks instead of silently using the ordinary batch-8
-contract.
+The registration stores immutable target, draft, comparison, and operating
+point identities. If any referenced artifact changes, later commands stop and
+require a new registration version. The verified active batch, scheduler queue,
+speculative width map, target runtime, and draft runtime are propagated to
+GSM8K/Core88. Values in the later planning shell are ignored for these fields.
 
 ## Experimental performance controls
 
-The proposer reads the following optional environment variables. Task specs
-copy explicitly configured values so external schedulers can reproduce them:
+The proposer reads the following environment variables while producing the
+A/B artifact. Registration seals their effective values, and formal task specs
+render those sealed values so external schedulers reproduce the same point:
 
 - `CONCEPTLM_DFLASH_ATTENTION_BACKEND`
 - `CONCEPTLM_DFLASH_CONTEXT_KV_CACHE`
@@ -136,6 +160,8 @@ copy explicitly configured values so external schedulers can reproduce them:
 - `CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT`
 - `CONCEPTLM_DFLASH_RUNTIME_LOCAL_MIXER`
 - `CONCEPTLM_DFLASH_MIXER_COMPILE_MODE`
+- `CONCEPTLM_DFLASH_CHUNK_SIZE`
+- `CONCEPTLM_DFLASH_TARGET_LAYERS`
 - `CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL`
 
 These knobs are experimental and are not promoted to a default quality preset.

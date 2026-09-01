@@ -19,6 +19,12 @@ TASK_SCHEMA_VERSION = "ncp-olmo-eval-task-v1"
 PLAN_SCHEMA_VERSION = "ncp-olmo-eval-plan-v1"
 TASK_STATES = frozenset({"Planned", "Running", "Succeeded", "Failed"})
 _SECRET_NAME = re.compile(r"(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)", re.I)
+_NON_SECRET_TOKEN_ENV_NAMES = frozenset(
+    {
+        "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_ROW",
+        "CONCEPTLM_DFLASH_MIN_PROPOSAL_TOKENS_PER_BATCH",
+    }
+)
 _IMMUTABLE_OCI_IMAGE = re.compile(r".+@sha256:[0-9a-fA-F]{64}")
 
 
@@ -78,7 +84,7 @@ class TaskSpec:
         for name, value in self.env.items():
             if not isinstance(name, str) or not isinstance(value, str):
                 raise ValueError("env must map strings to strings")
-            if _SECRET_NAME.search(name):
+            if _SECRET_NAME.search(name) and name not in _NON_SECRET_TOKEN_ENV_NAMES:
                 raise ValueError(
                     f"task specs must not embed credentials ({name}); inject them at execution time"
                 )

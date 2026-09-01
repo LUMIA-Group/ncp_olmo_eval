@@ -1915,6 +1915,9 @@ def main() -> None:
                 "attention_backend": args.vllm_attention_backend,
                 "flash_attn_version": args.vllm_flash_attn_version,
                 "hlm_attention_impl": args.vllm_hlm_attention_impl,
+                "vllm_use_v2_model_runner": os.environ.get(
+                    "VLLM_USE_V2_MODEL_RUNNER", "auto"
+                ),
                 "prefix_caching": False,
                 **native_vllm_speculative_manifest(args),
             }

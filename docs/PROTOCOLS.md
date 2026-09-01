@@ -31,8 +31,16 @@ one verification mode, and one comparison artifact.
   remains a separate, quality-gated evaluation identity.
 - Only GSM8K and Core88 accept speculative registrations. SciQ likelihood,
   RULER, and HELMET remain target-only.
-- The verified generation batch size replaces the ordinary batch size in the
-  emitted speculative generation tasks. Scoring contracts are unchanged.
+- The comparison seals the full operating point, not only the verification
+  mode: active batch size, scheduler queue, speculative width and adaptive
+  batch-width map, target runtime settings, and draft cache/mixer settings.
+- The verified batch size and scheduler queue replace the ordinary generation
+  settings in emitted speculative tasks. A queue larger than the active batch
+  is accepted only after the matched target/speculative A/B submitted at least
+  one full queue, so continuous admission is tested rather than inferred.
+- Formal tasks render DFlash environment variables exclusively from the sealed
+  artifact. Environment variables present in the planning shell cannot change
+  the registered operating point. Scoring contracts are unchanged.
 
 See [SPECULATIVE_DECODING.md](SPECULATIVE_DECODING.md) for the A/B command and
 runtime controls.

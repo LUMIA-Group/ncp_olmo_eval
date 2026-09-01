@@ -13,6 +13,45 @@ from ncp_olmo_eval.inference import SamplingParams
 def _result(
     token_ids: list[int], *, speculative: bool, verification_mode: str = "sequential_exact"
 ) -> dict:
+    runtime = {
+        "max_model_len": 8192,
+        "max_num_seqs": 1,
+        "scheduler_queue_size": 1,
+        "continuous_batching_enabled": False,
+        "tensor_parallel_size": 1,
+        "execution_mode": "eager",
+        "gpu_memory_utilization": 0.8,
+        "attention_backend": "FLASH_ATTN",
+        "flash_attn_version": 3,
+        "hlm_attention_impl": "legacy_mixed",
+        "vllm_use_v2_model_runner": "0",
+        "speculative_decoding": speculative,
+    }
+    if speculative:
+        runtime.update(
+            {
+                "speculative_num_tokens": 8,
+                "speculative_verification_mode": {
+                    "transactional_exact": "segmented_kv_approx",
+                    "chunk_parallel": "intra_chunk_exact",
+                }.get(verification_mode, verification_mode),
+                "speculative_draft_attention_backend": "flash_varlen",
+                "speculative_context_kv_cache": True,
+                "speculative_sparse_context_projection": True,
+                "speculative_min_eligible_batch": 1,
+                "speculative_min_proposal_tokens_per_row": 1,
+                "speculative_min_proposal_tokens_per_batch": 1,
+                "speculative_runtime_block_size": 0,
+                "speculative_active_batch_widths": "1:8,2:8,4:4,8:2",
+                "speculative_dynamic_runtime_block_size": True,
+                "speculative_runtime_layer_count": 5,
+                "speculative_runtime_local_mixer": "full",
+                "speculative_mixer_compile_mode": "default",
+                "speculative_chunk_size": 4,
+                "speculative_target_layers": "1,4,7,10,13",
+                "speculative_telemetry_flush_interval": 8,
+            }
+        )
     return {
         "seed": 42,
         "prompt_count": 1,
@@ -25,6 +64,7 @@ def _result(
         "gpu_memory_utilization": 0.8,
         "execution_mode": "eager",
         "vllm_use_v2_model_runner": "0",
+        "runtime": runtime,
         "output_token_count": len(token_ids),
         "vllm_version": "0.13.0",
         "speculative_verification_mode": (verification_mode if speculative else "not_applicable"),
@@ -94,6 +134,11 @@ def test_compare_persists_exact_mismatch_before_failing(tmp_path: Path) -> None:
     assert comparison["status"] == "NCP_DFLASH_VLLM_EXACT_MATCH_FAILED"
     assert comparison["exact_token_match_count"] == 0
     assert comparison["benchmark_contract"]["ignore_eos"] is True
+    assert comparison["speculative_operating_point"]["speculative_num_tokens"] == 8
+    assert (
+        comparison["speculative_operating_point"]["active_batch_widths"]
+        == "1:8,2:8,4:4,8:2"
+    )
     assert comparison["first_mismatch"] == {
         "prompt_index": 0,
         "generated_token_index": 1,

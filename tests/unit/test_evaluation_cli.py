@@ -59,6 +59,37 @@ def _verification_artifact(
     config = draft / "config.json"
     weights = draft / "model.safetensors"
     approximate = mode == "segmented_kv_approx"
+    operating_point = {
+        "schema_version": "ncp-dflash-operating-point-v1",
+        "max_model_len": 8192,
+        "max_num_seqs": 8,
+        "scheduler_queue_size": 32,
+        "continuous_batching_enabled": True,
+        "tensor_parallel_size": 1,
+        "execution_mode": "eager",
+        "gpu_memory_utilization": 0.8,
+        "attention_backend": "FLASH_ATTN",
+        "flash_attn_version": 3,
+        "hlm_attention_impl": "legacy_mixed",
+        "vllm_use_v2_model_runner": "0",
+        "speculative_num_tokens": 8,
+        "speculative_verification_mode": mode,
+        "draft_attention_backend": "flash_varlen",
+        "context_kv_cache": True,
+        "sparse_context_projection": True,
+        "min_eligible_batch": 1,
+        "min_proposal_tokens_per_row": 1,
+        "min_proposal_tokens_per_batch": 1,
+        "runtime_block_size": 0,
+        "active_batch_widths": "1:8,2:8,4:4,8:2",
+        "dynamic_runtime_block_size": True,
+        "runtime_layer_count": 5,
+        "runtime_local_mixer": "full",
+        "mixer_compile_mode": "default",
+        "chunk_size": 4,
+        "target_layers": "1,4,7,10,13",
+        "telemetry_flush_interval": 8,
+    }
     payload = {
         "status": (
             "NCP_DFLASH_VLLM_APPROXIMATE_AB_OK"
@@ -69,17 +100,21 @@ def _verification_artifact(
         "speculative_verification_mode": mode,
         "speculative_output_contract": "approximate" if approximate else "target_exact",
         "downstream_score_required": approximate,
-        "exact_token_match_count": 7 if approximate else 8,
-        "comparison_count": 8,
-        "generated_token_count": 1024,
+        "exact_token_match_count": 31 if approximate else 32,
+        "comparison_count": 32,
+        "generated_token_count": 4096,
         "throughput_speedup": 1.2 if approximate else 1.0,
         "benchmark_contract": {
             "seed": 42,
-            "prompt_count": 8,
+            "prompt_count": 32,
             "max_new_tokens": 128,
-            "batch_size": 1,
+            "batch_size": 8,
+            "scheduler_queue_size": 32,
+            "gpu_memory_utilization": 0.8,
+            "vllm_use_v2_model_runner": "0",
             "ignore_eos": True,
         },
+        "speculative_operating_point": operating_point,
         "target_model_identity": {"source_model": str(target.resolve())},
         "draft_model_identity": {
             "path": str(draft.resolve()),
@@ -134,6 +169,12 @@ def test_speculative_registration_is_target_and_draft_bound(tmp_path: Path) -> N
 
     assert registration["vllm_speculative_correctness_status"] == "EXACT_MATCH_VERIFIED"
     assert registration["vllm_speculative_verification"]["vllm_version"] == "0.13.0"
+    operating_point = registration["vllm_speculative_verification"][
+        "speculative_operating_point"
+    ]
+    assert operating_point["max_num_seqs"] == 8
+    assert operating_point["scheduler_queue_size"] == 32
+    assert operating_point["active_batch_widths"] == "1:8,2:8,4:4,8:2"
     _, loaded = evaluation_cli.load_registration(
         evaluation_root, registration["registration_name"]
     )
@@ -152,6 +193,46 @@ def test_approximate_speculative_registration_requires_opt_in(tmp_path: Path) ->
     )
 
     with pytest.raises(evaluation_cli.EvaluationError, match="显式设置"):
+        evaluation_cli.register_model(
+            root=evaluation_root,
+            checkpoint=checkpoint,
+            backend="vllm",
+            new_version=False,
+            vllm_speculative_draft_model=draft,
+            vllm_speculative_verification=verification,
+        )
+
+
+def test_speculative_registration_rejects_unsealed_legacy_artifact(tmp_path: Path) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _draft_checkpoint(tmp_path)
+    verification = _verification_artifact(tmp_path, target=checkpoint, draft=draft)
+    payload = json.loads(verification.read_text(encoding="utf-8"))
+    del payload["speculative_operating_point"]
+    verification.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(evaluation_cli.EvaluationError, match="operating point"):
+        evaluation_cli.register_model(
+            root=evaluation_root,
+            checkpoint=checkpoint,
+            backend="vllm",
+            new_version=False,
+            vllm_speculative_draft_model=draft,
+            vllm_speculative_verification=verification,
+        )
+
+
+def test_continuous_batch_registration_requires_a_full_verified_queue(tmp_path: Path) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _draft_checkpoint(tmp_path)
+    verification = _verification_artifact(tmp_path, target=checkpoint, draft=draft)
+    payload = json.loads(verification.read_text(encoding="utf-8"))
+    payload["benchmark_contract"]["prompt_count"] = 8
+    verification.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(evaluation_cli.EvaluationError, match="full scheduler queue"):
         evaluation_cli.register_model(
             root=evaluation_root,
             checkpoint=checkpoint,
@@ -241,6 +322,8 @@ def test_speculative_core88_dry_run_propagates_sealed_contract(
         ),
     )
     monkeypatch.setattr(evaluation_cli, "_git_state", lambda _: _clean_git_state(tmp_path))
+    monkeypatch.setenv("CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS", "8:0")
+    monkeypatch.setenv("CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT", "1")
 
     result = evaluation_cli.submit_inference(
         root=evaluation_root,
@@ -254,12 +337,20 @@ def test_speculative_core88_dry_run_propagates_sealed_contract(
 
     for task in result["jobs"][:4]:
         argv = task["command"]["argv"]
-        assert argv[argv.index("--generation-batch-size") + 1] == "1"
+        assert argv[argv.index("--score-batch-size") + 1] == "8"
+        assert argv[argv.index("--generation-batch-size") + 1] == "8"
+        assert argv[argv.index("--vllm-scheduler-queue-size") + 1] == "32"
+        assert argv[argv.index("--vllm-speculative-num-tokens") + 1] == "8"
         assert argv[argv.index("--vllm-speculative-draft-model") + 1] == str(
             draft.resolve()
         )
+        env = task["command"]["env"]
+        assert env["CONCEPTLM_DFLASH_ACTIVE_BATCH_WIDTHS"] == "1:8,2:8,4:4,8:2"
+        assert env["CONCEPTLM_DFLASH_RUNTIME_LAYER_COUNT"] == "5"
     gsm8k_argv = result["jobs"][4]["command"]["argv"]
-    assert gsm8k_argv[gsm8k_argv.index("--batch-size") + 1] == "1"
+    assert gsm8k_argv[gsm8k_argv.index("--batch-size") + 1] == "8"
+    assert gsm8k_argv[gsm8k_argv.index("--scheduler-queue-size") + 1] == "32"
+    assert gsm8k_argv[gsm8k_argv.index("--speculative-num-tokens") + 1] == "8"
     assert gsm8k_argv[gsm8k_argv.index("--speculative-draft-model") + 1] == str(
         draft.resolve()
     )

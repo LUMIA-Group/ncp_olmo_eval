@@ -500,8 +500,8 @@ def generate(args: argparse.Namespace) -> None:
         "enforce_eager": enforce_eager,
         "enable_prefix_caching": False,
         "max_model_len": args.max_model_len,
-        "max_num_seqs": args.batch_size,
         "gpu_memory_utilization": args.gpu_memory_utilization,
+        "max_num_seqs": args.batch_size,
         "disable_log_stats": False,
         "skip_tokenizer_init": False,
         "seed": args.sampling_seed,
@@ -667,6 +667,8 @@ def generate(args: argparse.Namespace) -> None:
         "scheduler_queue_size": scheduler_queue_size,
         "max_num_seqs": args.batch_size,
         "max_model_len": args.max_model_len,
+        "gpu_memory_utilization": args.gpu_memory_utilization,
+        "vllm_use_v2_model_runner": os.environ.get("VLLM_USE_V2_MODEL_RUNNER", "auto"),
         "sampling_seed": args.sampling_seed,
         "sampling_seed_semantics": (
             "sha256(base_seed,doc_index,sample_index) uint32; "
@@ -756,6 +758,21 @@ def generate(args: argparse.Namespace) -> None:
             os.environ.get("CONCEPTLM_DFLASH_MIXER_COMPILE_MODE", "default")
             if args.speculative_draft_model
             else "disabled"
+        ),
+        "speculative_chunk_size": (
+            int(os.environ.get("CONCEPTLM_DFLASH_CHUNK_SIZE", "4"))
+            if args.speculative_draft_model
+            else 0
+        ),
+        "speculative_target_layers": (
+            os.environ.get("CONCEPTLM_DFLASH_TARGET_LAYERS", "1,4,7,10,13")
+            if args.speculative_draft_model
+            else ""
+        ),
+        "speculative_telemetry_flush_interval": (
+            int(os.environ.get("CONCEPTLM_DFLASH_TELEMETRY_FLUSH_INTERVAL", "8"))
+            if args.speculative_draft_model
+            else 0
         ),
         "cuda_graph_mode": "NONE" if enforce_eager else "PIECEWISE",
         "model_dir": str(args.model_dir.resolve()),
@@ -877,6 +894,8 @@ def aggregate(args: argparse.Namespace) -> None:
         "scheduler_queue_size",
         "max_num_seqs",
         "max_model_len",
+        "gpu_memory_utilization",
+        "vllm_use_v2_model_runner",
         "sampling_seed",
         "sampling_seed_semantics",
         "temperature",
@@ -889,6 +908,8 @@ def aggregate(args: argparse.Namespace) -> None:
         "hlm_attention_impl",
         "speculative_decoding",
         "speculative_method",
+        "speculative_verification_mode",
+        "speculative_output_contract",
         "speculative_num_tokens",
         "speculative_draft_attention_backend",
         "speculative_context_kv_cache",
@@ -900,6 +921,11 @@ def aggregate(args: argparse.Namespace) -> None:
         "speculative_active_batch_widths",
         "speculative_dynamic_runtime_block_size",
         "speculative_runtime_layer_count",
+        "speculative_runtime_local_mixer",
+        "speculative_mixer_compile_mode",
+        "speculative_chunk_size",
+        "speculative_target_layers",
+        "speculative_telemetry_flush_interval",
         "model_family",
         "input_manifest_sha256",
     ):
@@ -974,6 +1000,10 @@ def aggregate(args: argparse.Namespace) -> None:
         "scheduler_queue_size": _require_consistent(results, "scheduler_queue_size"),
         "max_num_seqs": _require_consistent(results, "max_num_seqs"),
         "max_model_len": _require_consistent(results, "max_model_len"),
+        "gpu_memory_utilization": _require_consistent(results, "gpu_memory_utilization"),
+        "vllm_use_v2_model_runner": _require_consistent(
+            results, "vllm_use_v2_model_runner"
+        ),
         "gpu_count": args.world_size,
         "shard_count": args.world_size,
         "schedule_position_rule": ("doc_sample_pairs_doc_major[rank::world_size]"),
@@ -1006,6 +1036,12 @@ def aggregate(args: argparse.Namespace) -> None:
         "prefix_caching": False,
         "speculative_decoding": _require_consistent(results, "speculative_decoding"),
         "speculative_method": _require_consistent(results, "speculative_method"),
+        "speculative_verification_mode": _require_consistent(
+            results, "speculative_verification_mode"
+        ),
+        "speculative_output_contract": _require_consistent(
+            results, "speculative_output_contract"
+        ),
         "speculative_num_tokens": _require_consistent(results, "speculative_num_tokens"),
         "speculative_draft_attention_backend": _require_consistent(
             results, "speculative_draft_attention_backend"
@@ -1036,6 +1072,17 @@ def aggregate(args: argparse.Namespace) -> None:
         ),
         "speculative_runtime_layer_count": _require_consistent(
             results, "speculative_runtime_layer_count"
+        ),
+        "speculative_runtime_local_mixer": _require_consistent(
+            results, "speculative_runtime_local_mixer"
+        ),
+        "speculative_mixer_compile_mode": _require_consistent(
+            results, "speculative_mixer_compile_mode"
+        ),
+        "speculative_chunk_size": _require_consistent(results, "speculative_chunk_size"),
+        "speculative_target_layers": _require_consistent(results, "speculative_target_layers"),
+        "speculative_telemetry_flush_interval": _require_consistent(
+            results, "speculative_telemetry_flush_interval"
         ),
         "model_artifact": model_artifact,
         "vllm_version": _require_consistent(results, "vllm_version"),

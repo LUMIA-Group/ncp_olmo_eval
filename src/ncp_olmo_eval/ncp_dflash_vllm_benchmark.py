@@ -13,6 +13,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .dflash_contract import (
+    dflash_operating_point_from_runtime,
+    validate_dflash_operating_point,
+)
 from .inference import SamplingParams
 from .native_vllm_inference import (
     NCP_DFLASH_APPROXIMATE_VERIFICATION_MODES,
@@ -361,6 +365,24 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError(f"benchmark contract differs for {field}")
     if target.get("target_model_identity") != speculative.get("target_model_identity"):
         raise ValueError("target model identity differs between benchmark runs")
+    target_runtime = target.get("runtime")
+    speculative_runtime = speculative.get("runtime")
+    if not isinstance(target_runtime, dict) or not isinstance(speculative_runtime, dict):
+        raise ValueError("benchmark runs are missing native-vLLM runtime metadata")
+    for field in (
+        "max_model_len",
+        "max_num_seqs",
+        "scheduler_queue_size",
+        "tensor_parallel_size",
+        "execution_mode",
+        "gpu_memory_utilization",
+        "attention_backend",
+        "flash_attn_version",
+        "hlm_attention_impl",
+        "vllm_use_v2_model_runner",
+    ):
+        if target_runtime.get(field) != speculative_runtime.get(field):
+            raise ValueError(f"target/speculative runtime differs for {field}")
     draft_identity = speculative.get("draft_model_identity")
     if not isinstance(draft_identity, dict):
         raise ValueError("speculative benchmark is missing its draft identity")
@@ -410,6 +432,26 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         status = "NCP_DFLASH_VLLM_EXACT_MATCH_OK"
     else:
         status = "NCP_DFLASH_VLLM_EXACT_MATCH_FAILED"
+    benchmark_contract = {
+        field: target[field]
+        for field in (
+            "seed",
+            "prompt_count",
+            "prompt_offset",
+            "prompt_sha256",
+            "max_new_tokens",
+            "batch_size",
+            "scheduler_queue_size",
+            "gpu_memory_utilization",
+            "vllm_use_v2_model_runner",
+            "vllm_version",
+            "ignore_eos",
+        )
+    }
+    speculative_operating_point = validate_dflash_operating_point(
+        dflash_operating_point_from_runtime(speculative_runtime),
+        benchmark_contract=benchmark_contract,
+    )
     comparison = {
         "status": status,
         "speculative_output_contract": ("approximate" if approximate_mode else "target_exact"),
@@ -418,22 +460,8 @@ def compare(args: argparse.Namespace) -> dict[str, Any]:
         "comparison_count": len(exact),
         "exact_prompt_match_rate": sum(exact) / len(exact) if exact else None,
         "generated_token_count": int(target["output_token_count"]),
-        "benchmark_contract": {
-            field: target[field]
-            for field in (
-                "seed",
-                "prompt_count",
-                "prompt_offset",
-                "prompt_sha256",
-                "max_new_tokens",
-                "batch_size",
-                "scheduler_queue_size",
-                "gpu_memory_utilization",
-                "vllm_use_v2_model_runner",
-                "vllm_version",
-                "ignore_eos",
-            )
-        },
+        "benchmark_contract": benchmark_contract,
+        "speculative_operating_point": speculative_operating_point,
         "target_model_identity": target["target_model_identity"],
         "draft_model_identity": draft_identity,
         "vllm_version": target["vllm_version"],
@@ -539,4 +567,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
