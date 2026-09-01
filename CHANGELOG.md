@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0a14
+
+- Publish the final alpha validation record for the sealed NCP DFlash
+  continuous-batching operating point introduced in `0.1.0a13`, without
+  changing the inference or scoring protocols.
+- Record both the fixed active-batch/draft-width sweep and a mixed-length
+  32-request continuous queue. The tested pair reached `1.43x` steady-state
+  continuous throughput and preserved the adaptive `1:8,2:8,4:4,8:2` policy.
+- Document cold-start cost, pair-specific acceptance, and matched downstream
+  quality A/B results so the synthetic speed result cannot be presented as a
+  universal or target-exact guarantee.
+- Add release-metadata consistency coverage and package the sanitized
+  validation evidence in the source distribution.
+
 ## 0.1.0a13
 
 - Seal the complete target-plus-DFlash operating point into every comparison

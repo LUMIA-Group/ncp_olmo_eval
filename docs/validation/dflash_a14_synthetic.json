@@ -1,0 +1,85 @@
+{
+  "schema_version": "ncp-dflash-release-validation-v1",
+  "release": "0.1.0a14",
+  "validation_date": "2026-09-01",
+  "runtime": {
+    "validated_package_version": "0.1.0a13",
+    "release_runtime_unchanged": true,
+    "vllm_version": "0.13.0",
+    "hardware": "NVIDIA H200",
+    "matched_device_count": 2,
+    "seed": 42,
+    "ignore_eos": true,
+    "warmup_excluded": true
+  },
+  "operating_point": {
+    "max_num_seqs": 8,
+    "scheduler_queue_size": 32,
+    "speculative_num_tokens": 8,
+    "active_batch_widths": "1:8,2:8,4:4,8:2",
+    "verification_mode": "segmented_kv_approx"
+  },
+  "fixed_batch": {
+    "repeats": 4,
+    "output_tokens_per_request": 256,
+    "results": [
+      {"active_batch_size": 1, "draft_width": 8, "target_tps": 60.221464669914354, "speculative_tps": 222.09118866167339, "speedup": 3.6879074575651507},
+      {"active_batch_size": 2, "draft_width": 8, "target_tps": 108.58531084014217, "speculative_tps": 336.74075531517207, "speedup": 3.1011630644122508},
+      {"active_batch_size": 4, "draft_width": 4, "target_tps": 207.24023082679355, "speculative_tps": 391.85694279792216, "speedup": 1.8908343290035556},
+      {"active_batch_size": 8, "draft_width": 2, "target_tps": 385.32396949169964, "speculative_tps": 541.3432369778957, "speedup": 1.4049041322085645}
+    ]
+  },
+  "continuous_batch": {
+    "request_count_per_repeat": 32,
+    "repeats": 2,
+    "output_token_pattern": [64, 128, 256, 512],
+    "output_tokens": 15360,
+    "target_tps": 286.1412828609431,
+    "speculative_tps": 409.1629171033595,
+    "speedup": 1.4299331889911238
+  },
+  "model_load_seconds": {
+    "target": 26.053876825142652,
+    "speculative": 40.869831955991685,
+    "draft_increment": 14.815955130849033
+  },
+  "speculative_telemetry": {
+    "proposed_tokens": 23422,
+    "accepted_tokens_lower_bound": 22778,
+    "acceptance_rate_lower_bound": 0.972504482964734,
+    "active_batch_width_counts": {
+      "1:8": 188,
+      "2:8": 141,
+      "3:4": 30,
+      "4:4": 240,
+      "5:2": 36,
+      "6:2": 5,
+      "7:2": 63,
+      "8:2": 885
+    }
+  },
+  "downstream_quality": {
+    "gsm8k": {
+      "total": 1319,
+      "target_correct": 1092,
+      "speculative_correct": 1080,
+      "delta_percentage_points": -0.9098
+    },
+    "humaneval": {
+      "total": 164,
+      "target_correct": 76,
+      "speculative_correct": 69,
+      "delta_percentage_points": -4.2683
+    }
+  },
+  "source_evidence": {
+    "unredacted_comparison_sha256": "b403a17cda9f734b58086c6a493dd520c4c81b0fe206865272f22909cf6439b2",
+    "raw_artifact_bundled": false
+  },
+  "limitations": [
+    "Results are specific to one target and draft pair.",
+    "Steady-state throughput excludes model loading and warmup.",
+    "The approximate verification mode is not target-exact.",
+    "A new identity or operating point requires a fresh matched A/B."
+  ]
+}

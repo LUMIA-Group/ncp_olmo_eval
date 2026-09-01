@@ -165,6 +165,12 @@ batch, continuous scheduler queue, adaptive draft-width map, and target/draft
 runtime settings. Legacy a12 artifacts that only prove output correctness are
 rejected rather than silently run at a different operating point.
 
+The final alpha's matched H200 validation, including the `1.43x`
+mixed-length continuous-queue result, fixed batch/width sweep, cold-start cost,
+and downstream-quality caveats, is recorded in
+[VALIDATION.md](docs/VALIDATION.md). These measurements describe one tested
+target/draft pair and are not a general speed or quality guarantee.
+
 ### 2. Plan and run inference
 
 ```bash

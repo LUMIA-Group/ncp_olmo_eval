@@ -122,6 +122,12 @@ the same prompts. The release smoke must additionally confirm:
   claim unless the former is true for the tested target/draft pair;
 - the result contains finite acceptance, proposal, verification, timing, and
   throughput telemetry;
+- when the scheduler queue exceeds the active batch, at least one complete
+  queue is submitted and the result proves that dynamic batch sizes exercised
+  the sealed batch-to-width policy;
+- steady-state throughput excludes model loading and warmup, reports the draft
+  cold-start increment separately, and does not turn a pair-specific synthetic
+  speedup into a universal serving claim;
 - `segmented_kv_approx` executes end to end, remains opt-in, cannot satisfy an
   exact registration gate, and is followed by matched downstream score A/B
   before benchmark results are compared; and
