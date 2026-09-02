@@ -30,9 +30,11 @@ def test_release_version_is_consistent_across_metadata() -> None:
     assert _fallback_version(root / "src/ncp_olmo_eval/__init__.py") == version
 
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-    first_release = re.search(r"^## ([^\n]+)$", changelog, flags=re.MULTILINE)
-    assert first_release is not None
-    assert first_release.group(1) == version
+    releases = re.findall(r"^## ([^\n]+)$", changelog, flags=re.MULTILINE)
+    assert releases
+    released_versions = [release for release in releases if release != "Unreleased"]
+    assert released_versions
+    assert released_versions[0] == version
 
     validation = (root / "docs/validation/dflash_a14_synthetic.json").read_text(
         encoding="utf-8"

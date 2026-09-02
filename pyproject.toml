@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ncp-olmo-eval"
 version = "0.1.0a14"
-description = "Reproducible vLLM evaluation for OLMo and NCP OLMo"
+description = "Reproducible vLLM evaluation for OLMo and NCP-ArchPreview"
 readme = "README.md"
 requires-python = ">=3.12"
 license-files = ["LICENSE"]
 authors = [
-  {name = "NCP OLMo contributors"},
+  {name = "NCP-ArchPreview contributors"},
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

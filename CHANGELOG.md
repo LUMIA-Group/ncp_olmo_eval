@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Adopt **NCP-ArchPreview** as the public model-family name throughout the
+  documentation and package metadata while retaining existing distribution,
+  import, CLI, environment-variable, schema, and model-config identifiers for
+  backward compatibility.
+- Document the public Stage1, Stage2 v1/v2/v3, and Stage2 DFlash2 NCPFlash
+  checkpoints published by the ArchSpace Collection on Hugging Face.
+
 ## 0.1.0a14
 
 - Publish the final alpha validation record for the sealed NCP DFlash
@@ -166,7 +175,7 @@
 - First standalone alpha release.
 - Added a unified interactive and non-interactive CLI for model registration,
   inference, scoring, status, and finalization.
-- Added vLLM support for stock OLMo and the experimental NCP OLMo plugin.
+- Added vLLM support for stock OLMo and the experimental NCP-ArchPreview plugin.
 - Added Core88 plus standard GSM8K, RULER 4K-64K, and HELMET 8K-64K.
 - Added tokenizer-bound sealed long-context preparation, fail-closed resume and
   finalization contracts and explicit seed 42.

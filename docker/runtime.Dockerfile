@@ -29,7 +29,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
-      org.opencontainers.image.description="Portable vLLM runtime for NCP OLMo evaluation"
+      org.opencontainers.image.description="Portable vLLM runtime for NCP-ArchPreview evaluation"
 
 ENTRYPOINT []
 CMD ["ncp-olmo-eval", "--help"]

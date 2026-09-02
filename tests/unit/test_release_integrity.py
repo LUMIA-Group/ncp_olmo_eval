@@ -90,6 +90,38 @@ def test_release_pins_the_validated_vllm_dependency_pair() -> None:
     assert "huggingface-hub==0.36.2" in dependencies
 
 
+def test_public_prose_uses_ncp_archpreview_brand() -> None:
+    root = Path(__file__).resolve().parents[2]
+    public_paths = [
+        root / "README.md",
+        root / "CHANGELOG.md",
+        root / "pyproject.toml",
+        root / "src/ncp_olmo_eval/__init__.py",
+        *sorted((root / "docs").glob("*.md")),
+        *sorted((root / "docker").glob("*.Dockerfile")),
+    ]
+    legacy = [
+        str(path.relative_to(root))
+        for path in public_paths
+        if "NCP OLMo" in path.read_text(encoding="utf-8")
+        or "NCP-OLMo" in path.read_text(encoding="utf-8")
+    ]
+    assert not legacy, "legacy user-facing NCP OLMo brand remains in: " + ", ".join(legacy)
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    public_models = (
+        "NCP_ArchPreview_dolma3_8.9B_Stage1",
+        "NCP_ArchPreview_dolma3_8.9B_Stage2_v1",
+        "NCP_ArchPreview_dolma3_8.9B_Stage2_v2",
+        "NCP_ArchPreview_dolma3_8.9B_Stage2_v3",
+        "NCP_ArchPreview_dolma3_8.9B_Stage2_DFlash2_NCPFlash",
+    )
+    assert all(
+        f"https://huggingface.co/ArchSpace-Collection/{model_id}" in readme
+        for model_id in public_models
+    )
+
+
 def test_bigcodebench_does_not_import_olmo_eval_task_registry() -> None:
     root = Path(__file__).resolve().parents[2]
     source = (root / "src/ncp_olmo_eval/core_native_code_eval.py").read_text(encoding="utf-8")

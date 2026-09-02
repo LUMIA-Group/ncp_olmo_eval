@@ -15,7 +15,7 @@ authoritative when it is more specific than this overview.
 ## NCP DFlash speculative registrations
 
 Speculative decoding does not modify the target-only contracts below. It is a
-separate NCP OLMo registration that binds one target, one draft checkpoint,
+separate NCP-ArchPreview registration that binds one target, one draft checkpoint,
 one verification mode, and one comparison artifact.
 
 - Runtime: exactly vLLM 0.13.0.
@@ -25,7 +25,7 @@ one verification mode, and one comparison artifact.
   positive throughput speedup.
 - `segmented_kv_approx` requires explicit registration opt-in, records an
   approximate output contract, and requires matched downstream score A/B.
-- The stateful NCP OLMo target tested for `0.1.0a12` did not pass either
+- The stateful NCP-ArchPreview target tested for `0.1.0a12` did not pass either
   exact-labelled diagnostic mode. The release makes no production exact-parity
   claim; a failing exact artifact remains unusable, while the approximate path
   remains a separate, quality-gated evaluation identity.

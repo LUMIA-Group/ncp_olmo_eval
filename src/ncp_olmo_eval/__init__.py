@@ -1,4 +1,4 @@
-"""Unified vLLM evaluation for OLMo and NCP OLMo."""
+"""Unified vLLM evaluation for OLMo and NCP-ArchPreview."""
 
 from importlib.metadata import PackageNotFoundError, version
 

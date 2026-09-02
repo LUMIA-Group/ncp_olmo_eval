@@ -1,6 +1,6 @@
 # NCP DFlash speculative decoding
 
-Version 0.1.0a12 added an opt-in NCP DFlash path for NCP OLMo on the pinned
+Version 0.1.0a12 added an opt-in NCP DFlash path for NCP-ArchPreview on the pinned
 vLLM 0.13.0 runtime. It uses vLLM's upstream speculative scheduler and
 rejection sampler, but replaces the n-gram proposer with the NCP DFlash draft
 model. Installed vLLM files are not patched.
@@ -14,7 +14,7 @@ quality record in [VALIDATION.md](VALIDATION.md) plus release-metadata checks.
 
 This path is fail-closed:
 
-- the target must use the packaged NCP OLMo vLLM plugin;
+- the target must use the packaged NCP-ArchPreview vLLM plugin;
 - the draft directory must contain `config.json` and one
   `model.safetensors`;
 - the draft architecture and target-layer contract are validated at
@@ -35,7 +35,7 @@ This path is fail-closed:
 
 ## Current correctness boundary
 
-The stateful NCP OLMo target used while preparing `0.1.0a12` did **not** pass
+The stateful NCP-ArchPreview target used while preparing `0.1.0a12` did **not** pass
 target-only parity in either exact-labelled bring-up mode.  A release smoke on
 eight prompts and 1,024 forced tokens matched 7/8 prompt streams in
 `sequential_exact`; the comparison artifact was correctly persisted as
@@ -71,7 +71,7 @@ validated batch/width policy: active batch 8, scheduler queue 32, speculative
 width 8, and adaptive widths `1:8,2:8,4:4,8:2`.
 
 ```bash
-export TARGET=/models/ncp-olmo-target
+export TARGET=/models/ncp-archpreview-target
 export DRAFT=/models/ncp-dflash-draft
 export PROMPTS=/data/dflash-verification-prompts.jsonl
 export OUT=/shared/dflash-verification

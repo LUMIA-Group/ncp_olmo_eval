@@ -37,7 +37,7 @@ LABEL org.opencontainers.image.source="https://github.com/allenai/OLMo-core" \
       org.opencontainers.image.description="Pinned Core88 bubblewrap scorer runtime" \
       org.opencontainers.image.base.name="${CORE88_UPSTREAM_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \
-      org.opencontainers.image.vendor="NCP OLMo contributors"
+      org.opencontainers.image.vendor="NCP-ArchPreview contributors"
 
 ENTRYPOINT []
 CMD ["/bin/bash"]

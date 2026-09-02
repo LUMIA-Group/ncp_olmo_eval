@@ -1,9 +1,14 @@
 # ncp_olmo_eval
 
 `ncp_olmo_eval` is a scheduler-neutral, vLLM-only evaluation workflow for
-stock OLMo and NCP OLMo checkpoints. One CLI covers immutable model
+stock OLMo and NCP-ArchPreview checkpoints. One CLI covers immutable model
 registration, inference planning, scoring, artifact validation, and final
 result materialization for GSM8K, SciQ, Core88, RULER, and HELMET.
+
+The distribution name `ncp-olmo-eval`, Python package `ncp_olmo_eval`, CLI
+commands, and `NCP_OLMO_*` environment variables are retained as stable
+compatibility identifiers. User-facing model-family terminology is
+**NCP-ArchPreview**.
 
 The package does **not** submit to a cluster API. It emits ordinary JSON task
 specifications that can run in an existing allocation or through a thin Slurm,
@@ -25,7 +30,7 @@ mount, registry, proxy, account, credential, checkpoint, or scheduler default.
 | HELMET | pinned official profile, 8K/16K/32K/64K, seed 42, batch 4 | 1 x 8 GPU | family-by-length scores |
 
 NCP DFlash speculative decoding is available as a separately registered,
-experimental NCP OLMo path for GSM8K and Core88. Exact-labelled modes fail
+experimental NCP-ArchPreview path for GSM8K and Core88. Exact-labelled modes fail
 closed unless token parity is proven; the currently evidenced tuned path is
 explicitly approximate and requires matched downstream quality A/B. It never
 changes the ordinary target-only protocol. See
@@ -46,7 +51,7 @@ See [the exact protocol pins](docs/PROTOCOLS.md) before comparing results.
 | Model family | Runtime path | Required checkpoint form |
 |---|---|---|
 | Stock OLMo | vLLM built-in implementation | local Hugging Face-compatible directory |
-| NCP OLMo | installed `vllm.general_plugins` entry point | pure-HF config/tokenizer plus complete safetensors or bin shards |
+| NCP-ArchPreview | installed `vllm.general_plugins` entry point | pure-HF config/tokenizer plus complete safetensors or bin shards |
 | NCP DFlash draft | packaged vLLM 0.13 proposer adapter | remote-code draft config plus one `model.safetensors` |
 
 Registration checks, without modifying the checkpoint:
@@ -57,13 +62,26 @@ Registration checks, without modifying the checkpoint:
 - indexed weight files exist and their sizes are recorded;
 - later workflow steps see the same registered file contract.
 
-For NCP OLMo, install the package rather than only adding its source directory
+For NCP-ArchPreview, install the package rather than only adding its source directory
 to `PYTHONPATH`; vLLM discovers the model through the installed plugin entry
-point. NCP OLMo remains behind an explicit experimental opt-in gate.
+point. NCP-ArchPreview remains behind an explicit experimental opt-in gate.
+
+## Public NCP-ArchPreview checkpoints
+
+The following public Hugging Face checkpoints are the reference model set for
+this workflow:
+
+- [NCP_ArchPreview_dolma3_8.9B_Stage1](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage1)
+- [NCP_ArchPreview_dolma3_8.9B_Stage2_v1](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage2_v1)
+- [NCP_ArchPreview_dolma3_8.9B_Stage2_v2](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage2_v2)
+- [NCP_ArchPreview_dolma3_8.9B_Stage2_v3](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage2_v3)
+
+The paired speculative-decoding draft is
+[NCP_ArchPreview_dolma3_8.9B_Stage2_DFlash2_NCPFlash](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage2_DFlash2_NCPFlash).
 
 The current pinned runtime is Python 3.12, vLLM 0.13.0,
 Transformers 4.57.6, and `huggingface-hub` 0.36.2. Pre-release load smoke has
-also covered 17 local NCP OLMo HF exports (14 Stage1 and three Stage2): every
+also covered 17 local NCP-ArchPreview HF exports (14 Stage1 and three Stage2): every
 checkpoint loaded and produced a non-empty greedy continuation with the pinned
 runtime. That evidence is a load/route smoke, not a benchmark score or native
 backend parity claim.
@@ -134,7 +152,7 @@ register -> infer -> run inference plan -> status
 export EVAL_ROOT=/shared/ncp-olmo-eval/results
 
 ncp-olmo-eval --root "$EVAL_ROOT" register \
-  --checkpoint /models/olmo-or-ncp-olmo \
+  --checkpoint /models/olmo-or-ncp-archpreview \
   --backend vllm
 ```
 
@@ -147,7 +165,7 @@ artifact, then register both identities:
 
 ```bash
 ncp-olmo-eval --root "$EVAL_ROOT" register \
-  --checkpoint /models/ncp-olmo-target \
+  --checkpoint /models/ncp-archpreview-target \
   --backend vllm \
   --vllm-speculative-draft-model /models/ncp-dflash-draft \
   --vllm-speculative-verification /results/dflash/comparison.json \
