@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -88,6 +89,99 @@ def test_release_pins_the_validated_vllm_dependency_pair() -> None:
     dependencies = set(project["project"]["dependencies"])
     assert "transformers==4.57.6" in dependencies
     assert "huggingface-hub==0.36.2" in dependencies
+
+
+def test_release_metadata_declares_apache_and_packages_notices() -> None:
+    root = Path(__file__).resolve().parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["license"] == "Apache-2.0"
+    assert set(project["license-files"]) == {
+        "LICENSE",
+        "NOTICE",
+        "THIRD_PARTY_NOTICES.md",
+    }
+    license_lines = (root / "LICENSE").read_text(encoding="utf-8").splitlines()
+    assert [line.strip() for line in license_lines[:2]] == [
+        "Apache License",
+        "Version 2.0, January 2004",
+    ]
+    assert "NCP-ArchPreview contributors" in (root / "NOTICE").read_text(encoding="utf-8")
+
+
+def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
+    root = Path(__file__).resolve().parents[2]
+    asset_payload = json.loads((root / "configs/assets.example.json").read_text(encoding="utf-8"))
+    assert {item["name"] for item in asset_payload["assets"]} == {
+        "helmet-autoais",
+        "ruler-data",
+        "helmet-classic-data",
+    }
+    assert all(len(item["revision"]) == 40 for item in asset_payload["assets"])
+
+    images = json.loads(
+        (root / "configs/public-image-bases.json").read_text(encoding="utf-8")
+    )
+    assert images["release_version"] == "0.1.0a15"
+    assert len(images["upstream_bases"]) == 5
+    assert all(
+        len(value.rsplit("@sha256:", 1)[-1]) == 64
+        for value in images["upstream_bases"].values()
+    )
+    assert all(
+        value.startswith("ghcr.io/luckysjtu/ncp-olmo-eval-")
+        and value.endswith(":0.1.0a15")
+        for value in images["release_tags"].values()
+    )
+
+    public_paths = [
+        root / "README.md",
+        root / "pyproject.toml",
+        root / "configs/runtime.env.example",
+        root / "configs/apptainer-images.example.json",
+        root / "configs/public-image-bases.json",
+        root / "docs/IMAGES.md",
+        *sorted((root / "docker").glob("*.Dockerfile")),
+    ]
+    forbidden = ("REPLACE_ME", "your-org", "ghcr.io/ORG")
+    leaked = [
+        str(path.relative_to(root))
+        for path in public_paths
+        if any(token in path.read_text(encoding="utf-8") for token in forbidden)
+    ]
+    assert not leaked, "public release placeholders remain in: " + ", ".join(leaked)
+
+
+def test_release_workflows_use_oidc_and_pinned_actions() -> None:
+    root = Path(__file__).resolve().parents[2]
+    release = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    images = (root / ".github/workflows/publish-images.yml").read_text(encoding="utf-8")
+    assert "id-token: write" in release
+    assert "environment:\n      name: pypi" in release
+    assert "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33" in release
+    assert "password:" not in release
+    assert "packages: write" in images
+    assert "scripts/build-public-images.sh" in images
+    for workflow in (release, images):
+        action_refs = [
+            line.strip().split("uses:", 1)[1].strip()
+            for line in workflow.splitlines()
+            if line.strip().startswith("- uses:")
+        ]
+        assert action_refs
+        assert all("@" in ref and not ref.endswith(("@main", "@master", "@v1", "@v3")) for ref in action_refs)
+
+
+def test_public_dockerfiles_do_not_require_private_archives() -> None:
+    root = Path(__file__).resolve().parents[2]
+    ds1000 = (root / "docker/core88_ds1000.Dockerfile").read_text(encoding="utf-8")
+    assert "ds1000-runtime.tar.gz" not in ds1000
+    assert "python:3.10.13-slim-bookworm@sha256:" in ds1000
+    assert "tensorflow-cpu==2.16.1" in ds1000
+    bigcodebench = (root / "docker/core88_bigcodebench_sandbox.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert "bigcodebench/bigcodebench-gradio@sha256:" in bigcodebench
+    assert "PYTHONPATH=/opt/core88/olmo-eval-deps" in bigcodebench
 
 
 def test_public_prose_uses_ncp_archpreview_brand() -> None:

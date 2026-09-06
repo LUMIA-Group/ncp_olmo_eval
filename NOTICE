@@ -1,0 +1,10 @@
+ncp-olmo-eval
+Copyright 2026 NCP-ArchPreview contributors
+
+This product includes evaluation and compatibility work developed for the
+NCP-ArchPreview project.
+
+Portions of the implementation are adapted from or validated against upstream
+projects named in THIRD_PARTY_NOTICES.md. Their copyright, attribution, and
+redistribution terms remain in force for those portions and for separately
+obtained benchmark assets and container bases.

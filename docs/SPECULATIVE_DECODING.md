@@ -8,7 +8,7 @@ model. Installed vLLM files are not patched.
 Version 0.1.0a13 additionally seals and replays the full batch, scheduler
 queue, adaptive draft-width, target-runtime, and draft-runtime operating point.
 
-Version 0.1.0a14 is the final alpha validation release. It does not change that
+Version 0.1.0a14 is the retained alpha validation baseline. It does not change that
 operating point or any benchmark protocol; it adds a sanitized performance and
 quality record in [VALIDATION.md](VALIDATION.md) plus release-metadata checks.
 

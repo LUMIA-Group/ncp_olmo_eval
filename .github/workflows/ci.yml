@@ -12,11 +12,15 @@ permissions:
 jobs:
   host-contracts:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
           cache: pip
       - name: Install host-only dependencies
         run: python -m pip install -e '.[dev,scoring]'
@@ -31,8 +35,10 @@ jobs:
           find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
           python -m py_compile scripts/*.py
       - name: Build distributions
+        if: matrix.python == '3.12'
         run: python -m build
       - name: Verify Core88 summary from installed wheel path
+        if: matrix.python == '3.12'
         run: |
           python -m venv .ci/installed-package
           .ci/installed-package/bin/python -m pip install --no-deps dist/*.whl
@@ -43,7 +49,7 @@ jobs:
   docker-scorer-contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - name: Fetch pinned OLMo-Eval scorer source
         env:
           OLMO_EVAL_COMMIT: f8816eea36563f27b4a9dd2533d68d34f3c67d3f
@@ -75,24 +81,12 @@ jobs:
             echo "TREE_SITTER_PYTHON_WHEEL=.ci/wheels/$tree_sitter_python_wheel"
             echo "TREE_SITTER_PYTHON_SHA256=$(sha256sum ".ci/wheels/$tree_sitter_python_wheel" | awk '{print $1}')"
           } >> "$GITHUB_ENV"
-      - name: Build bubblewrap tools stage
-        run: |
-          docker build \
-            -f docker/core88_sandbox.Dockerfile \
-            --build-arg BASE_IMAGE=python:3.12.11-slim-bookworm \
-            --build-arg CORE88_RUNTIME_NAME=ci-sandbox-tools \
-            --build-arg CORE88_RUNTIME_PREFIX=/usr/local \
-            --build-arg CORE88_UPSTREAM_REFERENCE=debian:bookworm-slim \
-            --build-arg CORE88_SCORER_COMMIT="$(git rev-parse HEAD)" \
-            -t ncp-olmo-eval:ci-sandbox-tools .
       - name: Build and execute the formal BigCodeBench sandbox image
         env:
           OLMO_EVAL_COMMIT: f8816eea36563f27b4a9dd2533d68d34f3c67d3f
         run: |
           docker build \
             -f docker/core88_bigcodebench_sandbox.Dockerfile \
-            --build-arg TOOLS_IMAGE=ncp-olmo-eval:ci-sandbox-tools \
-            --build-arg BASE_IMAGE=ncp-olmo-eval:ci-runtime \
             --build-arg CORE88_UPSTREAM_REFERENCE="allenai/OLMo-Eval@$OLMO_EVAL_COMMIT" \
             --build-arg CORE88_SCORER_COMMIT="$(git rev-parse HEAD)" \
             --build-arg TREE_SITTER_WHEEL="$TREE_SITTER_WHEEL" \
@@ -105,4 +99,4 @@ jobs:
             -e OLMO_EVAL_ROOT=/opt/olmo-eval \
             -v "$PWD/.ci/olmo-eval:/opt/olmo-eval:ro" \
             ncp-olmo-eval:ci-bigcodebench-sandbox \
-            python3 -m ncp_olmo_eval.runtime_smoke all
+            python3 -m ncp_olmo_eval.runtime_smoke bigcodebench
