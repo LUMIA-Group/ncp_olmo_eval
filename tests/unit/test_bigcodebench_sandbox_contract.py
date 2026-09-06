@@ -11,6 +11,9 @@ def test_formal_bigcodebench_image_exposes_locked_parser_wheels() -> None:
     assert "CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps" in dockerfile
     assert "PYTHONPATH=/opt/core88/olmo-eval-deps" in dockerfile
     assert "import tree_sitter, tree_sitter_python" in dockerfile
+    assert dockerfile.index("PYTHONPATH=/opt/core88/olmo-eval-deps") < dockerfile.index(
+        "import tree_sitter, tree_sitter_python"
+    )
     assert "COPY ${TREE_SITTER_WHEEL} /tmp/core88-wheels/tree_sitter.whl" in dockerfile
     assert (
         "COPY ${TREE_SITTER_PYTHON_WHEEL} /tmp/core88-wheels/tree_sitter_python.whl"

@@ -46,16 +46,16 @@ RUN set -eux; \
       '}' \
       > /opt/core88/image/RUNTIME.json
 
+ENV CORE88_RUNTIME_PREFIX=/usr/local \
+    CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps \
+    PYTHONPATH=/opt/core88/olmo-eval-deps \
+    NCP_OLMO_SOURCE_REVISION=${CORE88_SCORER_COMMIT}
+
 WORKDIR /opt/ncp-olmo-eval
 COPY . /opt/ncp-olmo-eval
 RUN python3 -m pip install --no-cache-dir --no-deps . \
  && python3 -c 'import tree_sitter, tree_sitter_python' \
  && python3 -c 'import ncp_olmo_eval; print(ncp_olmo_eval.__version__)'
-
-ENV CORE88_RUNTIME_PREFIX=/usr/local \
-    CORE88_OLMO_EVAL_DEPS=/opt/core88/olmo-eval-deps \
-    PYTHONPATH=/opt/core88/olmo-eval-deps \
-    NCP_OLMO_SOURCE_REVISION=${CORE88_SCORER_COMMIT}
 
 LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
       org.opencontainers.image.description="Pinned BigCodeBench scorer over the official public runtime" \

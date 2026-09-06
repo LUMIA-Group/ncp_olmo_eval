@@ -3,7 +3,10 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 CI job
+    import tomli as tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
