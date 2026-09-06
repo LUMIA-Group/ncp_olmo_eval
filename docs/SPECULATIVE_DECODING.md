@@ -15,8 +15,9 @@ quality record in [VALIDATION.md](VALIDATION.md) plus release-metadata checks.
 This path is fail-closed:
 
 - the target must use the packaged NCP-ArchPreview vLLM plugin;
-- the draft directory must contain `config.json` and one
-  `model.safetensors`;
+- the draft directory must contain `config.json` and either one
+  `model.safetensors` or a Hugging Face `model.safetensors.index.json` plus all
+  referenced SafeTensors shards;
 - the draft architecture and target-layer contract are validated at
   registration;
 - formal inference requires a target/draft-bound A/B artifact produced by the

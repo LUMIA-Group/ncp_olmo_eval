@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from .dflash_checkpoint import dflash_checkpoint_identity, dflash_weight_files
 from .inference import SamplingParams, TextCompletion
 
 NATIVE_VLLM_BACKEND = "native_vllm"
@@ -189,11 +190,10 @@ def validate_native_vllm_args(
         if model_family != "conceptlm":
             raise ValueError("NCP DFlash requires --vllm-model-family=conceptlm")
         draft_path = Path(draft_model)
-        if not draft_path.is_dir():
-            raise ValueError(f"NCP DFlash checkpoint does not exist: {draft_path}")
-        for required_name in ("config.json", "model.safetensors"):
-            if not (draft_path / required_name).is_file():
-                raise ValueError(f"NCP DFlash checkpoint is missing {required_name}: {draft_path}")
+        try:
+            dflash_weight_files(draft_path)
+        except (FileNotFoundError, ValueError) as error:
+            raise ValueError(str(error)) from error
         proposal_count = int(getattr(args, "vllm_speculative_num_tokens", 16))
         if not 0 < proposal_count <= 16:
             raise ValueError("vllm_speculative_num_tokens must be in [1, 16]")
@@ -255,21 +255,13 @@ def native_vllm_speculative_manifest(args: argparse.Namespace) -> dict[str, Any]
         }
 
     draft_root = Path(str(draft_value)).resolve()
-    draft_config = draft_root / "config.json"
-    draft_weights = draft_root / "model.safetensors"
-    weights_stat = draft_weights.stat()
     verification_mode = str(runtime["speculative_verification_mode"])
     exact_mode = verification_mode in NCP_DFLASH_EXACT_VERIFICATION_MODES
     return {
         "speculative_decoding": True,
         "speculative_method": "ncp_dflash_vllm_0_13",
         "speculative_draft_model": str(draft_root),
-        "speculative_draft_identity": {
-            "path": str(draft_root),
-            "config_sha256": _file_sha256(draft_config),
-            "weights_size": weights_stat.st_size,
-            "weights_mtime_ns": weights_stat.st_mtime_ns,
-        },
+        "speculative_draft_identity": dflash_checkpoint_identity(draft_root),
         "speculative_num_tokens": int(runtime["speculative_num_tokens"]),
         "speculative_verification_mode": verification_mode,
         "speculative_output_contract": "target_exact" if exact_mode else "approximate",
@@ -596,11 +588,7 @@ class NativeVLLMInferencer:
                 raise ValueError("NCP DFlash requires model_family='conceptlm'")
             draft_root = Path(self.speculative_draft_model)
             draft_config_path = draft_root / "config.json"
-            draft_weights_path = draft_root / "model.safetensors"
-            if not draft_config_path.is_file() or not draft_weights_path.is_file():
-                raise FileNotFoundError(
-                    "NCP DFlash requires config.json and model.safetensors: " f"{draft_root}"
-                )
+            dflash_weight_files(draft_root)
             draft_config = json.loads(draft_config_path.read_text(encoding="utf-8"))
             required_contract = {
                 "model_type": "conceptlm_dflash",

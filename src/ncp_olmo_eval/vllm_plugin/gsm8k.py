@@ -15,6 +15,7 @@ from ncp_olmo_eval.core_native_answer_eval import (
     OFFICIAL_OLMO_EVAL_COMMIT,
     score_gsm_answer,
 )
+from ncp_olmo_eval.dflash_checkpoint import dflash_weight_files
 from ncp_olmo_eval.lm_eval_runtime import runtime_identity, task_manager_class
 
 STANDARD_TASK_GROUP = "olmo_eval_paper_math_gsm_8shot"
@@ -473,8 +474,7 @@ def generate(args: argparse.Namespace) -> None:
         if args.speculative_draft_model:
             draft_root = args.speculative_draft_model.resolve()
             draft_config = _read_json(draft_root / "config.json")
-            if not (draft_root / "model.safetensors").is_file():
-                raise FileNotFoundError(f"NCP DFlash model.safetensors is missing: {draft_root}")
+            dflash_weight_files(draft_root)
             os.environ["CONCEPTLM_VLLM_ENABLE_NCP_DFLASH"] = "1"
             os.environ["CONCEPTLM_DFLASH_CHECKPOINT"] = str(draft_root)
             os.environ["CONCEPTLM_DFLASH_TARGET_LAYERS"] = ",".join(

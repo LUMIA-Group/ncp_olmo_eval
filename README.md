@@ -54,7 +54,7 @@ See [the exact protocol pins](docs/PROTOCOLS.md) before comparing results.
 |---|---|---|
 | Stock OLMo | vLLM built-in implementation | local Hugging Face-compatible directory |
 | NCP-ArchPreview | installed `vllm.general_plugins` entry point | pure-HF config/tokenizer plus complete safetensors or bin shards |
-| NCP DFlash draft | packaged vLLM 0.13 proposer adapter | remote-code draft config plus one `model.safetensors` |
+| NCP DFlash draft | packaged vLLM 0.13 proposer adapter | remote-code draft config plus either one `model.safetensors` or a Hugging Face `model.safetensors.index.json` with all referenced shards |
 
 Registration checks, without modifying the checkpoint:
 

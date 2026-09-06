@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Accept NCP DFlash checkpoints published as Hugging Face sharded SafeTensors,
+  validate every file referenced by `model.safetensors.index.json`, and seal
+  the full shard identity while retaining one-file checkpoint compatibility.
+
 ## 0.1.0a15
 
 - Adopt **NCP-ArchPreview** as the public model-family name throughout the

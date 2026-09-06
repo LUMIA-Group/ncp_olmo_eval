@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .dflash_checkpoint import dflash_checkpoint_identity
 from .dflash_contract import (
     dflash_operating_point_from_runtime,
     validate_dflash_operating_point,
@@ -105,19 +106,7 @@ def _prompt_hash(prompts: list[str]) -> str:
 def _draft_identity(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
-    root = path.resolve()
-    config_path = root / "config.json"
-    weights_path = root / "model.safetensors"
-    if not config_path.is_file() or not weights_path.is_file():
-        raise FileNotFoundError(
-            f"DFlash identity requires config.json and model.safetensors: {root}"
-        )
-    return {
-        "path": str(root),
-        "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
-        "weights_size": weights_path.stat().st_size,
-        "weights_mtime_ns": weights_path.stat().st_mtime_ns,
-    }
+    return dflash_checkpoint_identity(path)
 
 
 def _target_identity(overlay: dict[str, Any]) -> dict[str, Any]:
