@@ -70,6 +70,11 @@ jobs:
           mkdir -p .ci/wheels
           python -m pip download --only-binary=:all: --no-deps \
             --dest .ci/wheels \
+            --python-version 310 \
+            --implementation cp \
+            --abi cp310 \
+            --abi abi3 \
+            --platform manylinux_2_28_x86_64 \
             tree-sitter==0.25.2 tree-sitter-python==0.25.0
           tree_sitter_wheel="$(basename "$(find .ci/wheels -maxdepth 1 -name 'tree_sitter-*.whl' -print -quit)")"
           tree_sitter_python_wheel="$(basename "$(find .ci/wheels -maxdepth 1 -name 'tree_sitter_python-*.whl' -print -quit)")"

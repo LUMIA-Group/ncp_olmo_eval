@@ -26,3 +26,6 @@ def test_ci_executes_the_formal_bigcodebench_image() -> None:
     workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "docker/core88_bigcodebench_sandbox.Dockerfile" in workflow
     assert "docker/ci_scorer_smoke.Dockerfile" not in workflow
+    assert "--python-version 310" in workflow
+    assert "--abi cp310" in workflow
+    assert "--platform manylinux_2_28_x86_64" in workflow
