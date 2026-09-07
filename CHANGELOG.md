@@ -21,6 +21,8 @@
 - Add a PyPI Trusted Publishing workflow that builds once, validates the wheel
   and source distribution, and publishes through GitHub OIDC without a stored
   API token.
+- Build each public OCI image on an isolated matrix runner, then merge and
+  verify their immutable digest fragments without exhausting a shared runner.
 - Replace asset and image placeholders with pinned public references or an
   explicit gated-asset boundary, and document the one-time publisher setup.
 

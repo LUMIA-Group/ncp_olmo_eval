@@ -8,6 +8,29 @@ PUSH="${PUSH:-0}"
 SOURCE_REVISION="${SOURCE_REVISION:-$(git rev-parse HEAD)}"
 BUILD_DIR="${BUILD_DIR:-.image-build}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
+IMAGE_KEY="${IMAGE_KEY:-}"
+
+IMAGE_KEYS=(
+  NCP_OLMO_EVAL_IMAGE
+  CORE88_PYTHON_IMAGE
+  CORE88_BIGCODEBENCH_IMAGE
+  CORE88_DS1000_IMAGE
+  CORE88_MULTIPLE_IMAGE
+)
+
+if [[ -n "$IMAGE_KEY" ]]; then
+  supported=0
+  for candidate in "${IMAGE_KEYS[@]}"; do
+    if [[ "$IMAGE_KEY" == "$candidate" ]]; then
+      supported=1
+      break
+    fi
+  done
+  if [[ "$supported" != "1" ]]; then
+    echo "Unsupported IMAGE_KEY: $IMAGE_KEY" >&2
+    exit 2
+  fi
+fi
 
 if [[ ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "SOURCE_REVISION must be a full Git commit SHA" >&2
@@ -70,20 +93,30 @@ build_image() {
     .
 }
 
-build_image NCP_OLMO_EVAL_IMAGE runtime docker/runtime.Dockerfile \
-  --build-arg "SOURCE_REVISION=$SOURCE_REVISION"
-build_image CORE88_PYTHON_IMAGE core88-python docker/core88_sandbox.Dockerfile \
-  --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
-build_image CORE88_BIGCODEBENCH_IMAGE core88-bigcodebench \
-  docker/core88_bigcodebench_sandbox.Dockerfile \
-  --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
-build_image CORE88_DS1000_IMAGE core88-ds1000 docker/core88_ds1000.Dockerfile \
-  --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
-build_image CORE88_MULTIPLE_IMAGE core88-multiple docker/core88_thin_sandbox.Dockerfile \
-  --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
+if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "NCP_OLMO_EVAL_IMAGE" ]]; then
+  build_image NCP_OLMO_EVAL_IMAGE runtime docker/runtime.Dockerfile \
+    --build-arg "SOURCE_REVISION=$SOURCE_REVISION"
+fi
+if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "CORE88_PYTHON_IMAGE" ]]; then
+  build_image CORE88_PYTHON_IMAGE core88-python docker/core88_sandbox.Dockerfile \
+    --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
+fi
+if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "CORE88_BIGCODEBENCH_IMAGE" ]]; then
+  build_image CORE88_BIGCODEBENCH_IMAGE core88-bigcodebench \
+    docker/core88_bigcodebench_sandbox.Dockerfile \
+    --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
+fi
+if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "CORE88_DS1000_IMAGE" ]]; then
+  build_image CORE88_DS1000_IMAGE core88-ds1000 docker/core88_ds1000.Dockerfile \
+    --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
+fi
+if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "CORE88_MULTIPLE_IMAGE" ]]; then
+  build_image CORE88_MULTIPLE_IMAGE core88-multiple docker/core88_thin_sandbox.Dockerfile \
+    --build-arg "CORE88_SCORER_COMMIT=$SOURCE_REVISION"
+fi
 
 SOURCE_REVISION="$SOURCE_REVISION" VERSION="$VERSION" REGISTRY="$REGISTRY" \
-OUTPUT_DIR="$OUTPUT_DIR" PUSH="$PUSH" python3 - <<'PY'
+OUTPUT_DIR="$OUTPUT_DIR" PUSH="$PUSH" IMAGE_KEY="$IMAGE_KEY" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -100,7 +133,10 @@ suffixes = {
     "CORE88_MULTIPLE_IMAGE": "core88-multiple",
 }
 images = {}
-for key, suffix in suffixes.items():
+selected = os.environ["IMAGE_KEY"]
+keys = [selected] if selected else list(suffixes)
+for key in keys:
+    suffix = suffixes[key]
     metadata = json.loads((output / f"{key}.metadata.json").read_text(encoding="utf-8"))
     digest = metadata.get("containerimage.digest")
     tag = f"{registry}/ncp-olmo-eval-{suffix}:{version}"
@@ -115,18 +151,24 @@ payload = {
     "immutable": os.environ["PUSH"] == "1",
     "images": images,
 }
-(output / "public-images.json").write_text(
+suffix = f"-{selected}" if selected else ""
+(output / f"public-images{suffix}.json").write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
 )
-(output / "public-images.env").write_text(
+(output / f"public-images{suffix}.env").write_text(
     "\n".join(f"{key}={value}" for key, value in images.items()) + "\n",
     encoding="utf-8",
 )
 PY
 
 if [[ "$PUSH" == "1" ]]; then
-  test "$(grep -Ec '@sha256:[0-9a-f]{64}$' "$OUTPUT_DIR/public-images.env")" = 5
+  manifest_suffix="${IMAGE_KEY:+-$IMAGE_KEY}"
+  expected_count=5
+  if [[ -n "$IMAGE_KEY" ]]; then
+    expected_count=1
+  fi
+  test "$(grep -Ec '@sha256:[0-9a-f]{64}$' "$OUTPUT_DIR/public-images${manifest_suffix}.env")" = "$expected_count"
 fi
 
 rm -rf "$BUILD_DIR"
-printf 'Image manifest: %s\n' "$OUTPUT_DIR/public-images.json"
+printf 'Image manifest: %s\n' "$OUTPUT_DIR/public-images${IMAGE_KEY:+-$IMAGE_KEY}.json"

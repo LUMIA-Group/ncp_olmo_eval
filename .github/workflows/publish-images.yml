@@ -18,8 +18,17 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image_key:
+          - NCP_OLMO_EVAL_IMAGE
+          - CORE88_PYTHON_IMAGE
+          - CORE88_BIGCODEBENCH_IMAGE
+          - CORE88_DS1000_IMAGE
+          - CORE88_MULTIPLE_IMAGE
     permissions:
-      contents: write
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -45,11 +54,90 @@ jobs:
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
       - name: Build, smoke, and push release images
         env:
+          IMAGE_KEY: ${{ matrix.image_key }}
+          OUTPUT_DIR: dist/${{ matrix.image_key }}
           PUSH: "1"
           VERSION: ${{ steps.identity.outputs.version }}
           SOURCE_REVISION: ${{ steps.identity.outputs.revision }}
           REGISTRY: ghcr.io/luckysjtu
         run: scripts/build-public-images.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-image-${{ matrix.image_key }}
+          path: |
+            dist/${{ matrix.image_key }}/public-images-${{ matrix.image_key }}.env
+            dist/${{ matrix.image_key }}/public-images-${{ matrix.image_key }}.json
+          if-no-files-found: error
+
+  manifest:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          pattern: public-image-*
+          path: dist/fragments
+          merge-multiple: true
+      - name: Merge and verify immutable image manifests
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          expected = (
+              "NCP_OLMO_EVAL_IMAGE",
+              "CORE88_PYTHON_IMAGE",
+              "CORE88_BIGCODEBENCH_IMAGE",
+              "CORE88_DS1000_IMAGE",
+              "CORE88_MULTIPLE_IMAGE",
+          )
+          fragments = sorted(Path("dist/fragments").glob("public-images-*.json"))
+          if len(fragments) != len(expected):
+              raise SystemExit(f"expected {len(expected)} image fragments, found {len(fragments)}")
+
+          version = None
+          revision = None
+          images = {}
+          for path in fragments:
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              if payload.get("schema_version") != "ncp-olmo-eval-published-images-v1":
+                  raise SystemExit(f"unexpected schema in {path}")
+              if payload.get("immutable") is not True:
+                  raise SystemExit(f"mutable image fragment: {path}")
+              version = version or payload["release_version"]
+              revision = revision or payload["source_revision"]
+              if payload["release_version"] != version or payload["source_revision"] != revision:
+                  raise SystemExit(f"release identity mismatch in {path}")
+              for key, value in payload["images"].items():
+                  if key in images:
+                      raise SystemExit(f"duplicate image key: {key}")
+                  if not re.search(r"@sha256:[0-9a-f]{64}$", value):
+                      raise SystemExit(f"missing immutable digest for {key}")
+                  images[key] = value
+
+          if tuple(key for key in expected if key in images) != expected or len(images) != len(expected):
+              raise SystemExit(f"image keys do not match release contract: {sorted(images)}")
+
+          output = Path("dist")
+          combined = {
+              "schema_version": "ncp-olmo-eval-published-images-v1",
+              "release_version": version,
+              "source_revision": revision,
+              "immutable": True,
+              "images": {key: images[key] for key in expected},
+          }
+          (output / "public-images.json").write_text(
+              json.dumps(combined, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          (output / "public-images.env").write_text(
+              "\n".join(f"{key}={images[key]}" for key in expected) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          test "$(grep -Ec '@sha256:[0-9a-f]{64}$' dist/public-images.env)" = 5
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: public-image-digests
