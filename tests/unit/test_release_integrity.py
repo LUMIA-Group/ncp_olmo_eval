@@ -185,6 +185,17 @@ def test_public_dockerfiles_do_not_require_private_archives() -> None:
     )
     assert "bigcodebench/bigcodebench-gradio@sha256:" in bigcodebench
     assert "PYTHONPATH=/opt/core88/olmo-eval-deps" in bigcodebench
+    multiple = (root / "docker/core88_thin_sandbox.Dockerfile").read_text(encoding="utf-8")
+    assert "'setuptools==80.9.0'" in multiple
+    assert "--no-build-isolation ." in multiple
+
+
+def test_cuda_image_publish_job_reclaims_hosted_runner_disk() -> None:
+    root = Path(__file__).resolve().parents[2]
+    workflow = (root / ".github/workflows/publish-images.yml").read_text(encoding="utf-8")
+    assert "if: matrix.image_key == 'NCP_OLMO_EVAL_IMAGE'" in workflow
+    assert "/usr/local/lib/android" in workflow
+    assert "docker system prune --all --force" in workflow
 
 
 def test_public_prose_uses_ncp_archpreview_brand() -> None:

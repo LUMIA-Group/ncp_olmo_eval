@@ -23,6 +23,9 @@
   API token.
 - Build each public OCI image on an isolated matrix runner, then merge and
   verify their immutable digest fragments without exhausting a shared runner.
+- Reclaim preinstalled hosted-runner toolchains before building the large CUDA
+  runtime image, and bootstrap pinned modern packaging tools in the legacy
+  MultiPL-E base so the release package is installed by its real identity.
 - Replace asset and image placeholders with pinned public references or an
   explicit gated-asset boundary, and document the one-time publisher setup.
 

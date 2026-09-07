@@ -32,7 +32,9 @@ RUN set -eux; \
 
 WORKDIR /opt/ncp-olmo-eval
 COPY . /opt/ncp-olmo-eval
-RUN python3 -m pip install --no-cache-dir --no-deps . \
+RUN python3 -m pip install --no-cache-dir \
+      'pip==25.2' 'setuptools==80.9.0' 'wheel==0.45.1' \
+ && python3 -m pip install --no-cache-dir --no-deps --no-build-isolation . \
  && python3 -c 'import ncp_olmo_eval; print(ncp_olmo_eval.__version__)'
 
 ENV CORE88_RUNTIME_PREFIX=${CORE88_RUNTIME_PREFIX} \
