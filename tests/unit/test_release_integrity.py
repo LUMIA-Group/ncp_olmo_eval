@@ -86,6 +86,20 @@ def test_release_pins_official_math_runtime_dependencies() -> None:
     assert "ncp_olmo_eval.runtime_smoke math" in dockerfile
 
 
+def test_public_package_metadata_has_no_direct_url_dependencies() -> None:
+    root = Path(__file__).resolve().parents[2]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    requirements = list(project["dependencies"])
+    requirements.extend(
+        requirement
+        for extra in project["optional-dependencies"].values()
+        for requirement in extra
+    )
+    assert not [requirement for requirement in requirements if " @ " in requirement]
+    assert "lm-eval==0.4.13" in project["optional-dependencies"]["vllm"]
+    assert "lm-eval==0.4.13" in project["optional-dependencies"]["gsm8k"]
+
+
 def test_release_pins_the_validated_vllm_dependency_pair() -> None:
     root = Path(__file__).resolve().parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
@@ -124,7 +138,7 @@ def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
     images = json.loads(
         (root / "configs/public-image-bases.json").read_text(encoding="utf-8")
     )
-    assert images["release_version"] == "0.1.0a15"
+    assert images["release_version"] == "0.1.0a16"
     assert len(images["upstream_bases"]) == 5
     assert all(
         len(value.rsplit("@sha256:", 1)[-1]) == 64
@@ -132,7 +146,7 @@ def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
     )
     assert all(
         value.startswith("ghcr.io/luckysjtu/ncp-olmo-eval-")
-        and value.endswith(":0.1.0a15")
+        and value.endswith(":0.1.0a16")
         for value in images["release_tags"].values()
     )
 

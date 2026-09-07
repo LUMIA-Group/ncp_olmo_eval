@@ -93,7 +93,7 @@ backend parity claim.
 After the alpha is published to PyPI:
 
 ```bash
-python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0a15'
+python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0a16'
 ```
 
 Until then, or when validating a source revision, install from a clean checkout:
@@ -115,9 +115,10 @@ source .venv/bin/activate
 python -m pip install -e '.[dev,scoring]'
 ```
 
-Use `.[gsm8k,dev]` for CPU-only GSM8K preparation. The `vllm` extra already
-contains the same pinned `lm-evaluation-harness` commit. A different harness
-revision is rejected before the formal GSM8K/Core88 task data is read.
+Use `.[gsm8k,dev]` for CPU-only GSM8K preparation. The `vllm` and `gsm8k`
+extras both pin the official `lm-eval==0.4.13` distribution and seal its tagged
+source commit into prepared manifests. A different harness version is rejected
+before the formal GSM8K/Core88 task data is read.
 
 The `scoring` extra pins the exact SymPy/ANTLR runtime used by the Minerva,
 MATH, and MATH-500 scorer. The production runtime image installs that slice and

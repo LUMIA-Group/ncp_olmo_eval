@@ -7,10 +7,10 @@ import importlib.metadata
 from typing import Any
 
 LM_EVAL_DISTRIBUTION = "lm_eval"
-LM_EVAL_VERSION = "0.4.13.dev0"
-LM_EVAL_COMMIT = "95d580638385578c1c07fa554cf16ad7f5b5f460"
+LM_EVAL_VERSION = "0.4.13"
+LM_EVAL_COMMIT = "ddd67220430a2470529f25fd5c05a576ca1057a0"
 LM_EVAL_REPOSITORY = "https://github.com/EleutherAI/lm-evaluation-harness.git"
-LM_EVAL_REQUIREMENT = f"lm_eval @ git+{LM_EVAL_REPOSITORY}@{LM_EVAL_COMMIT}"
+LM_EVAL_REQUIREMENT = f"lm-eval=={LM_EVAL_VERSION}"
 
 
 def _installed_version() -> str:

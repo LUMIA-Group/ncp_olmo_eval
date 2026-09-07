@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.1.0a15}"
+VERSION="${VERSION:-0.1.0a16}"
 REGISTRY="${REGISTRY:-ghcr.io/luckysjtu}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 PUSH="${PUSH:-0}"

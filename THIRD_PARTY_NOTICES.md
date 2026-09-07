@@ -9,7 +9,7 @@ runtime compatibility:
 |---|---|---|
 | [AllenAI OLMo](https://github.com/allenai/OLMo) and [OLMo-Eval](https://github.com/allenai/OLMo-Eval) | model/evaluation compatibility and pinned scorer behavior | Apache-2.0 |
 | [vLLM](https://github.com/vllm-project/vllm) | inference runtime and plugin API | Apache-2.0 |
-| [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) at `95d580638385578c1c07fa554cf16ad7f5b5f460` | GSM8K/Core88 task materialization | MIT |
+| [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) `v0.4.13` at `ddd67220430a2470529f25fd5c05a576ca1057a0` | GSM8K/Core88 task materialization | MIT |
 | [AllenAI OLMES](https://github.com/allenai/olmes) at `5a51f502d463b8cdc4a2dcad7d7096c41ff1197e` and [NVIDIA RULER](https://github.com/NVIDIA/RULER) | RULER protocol and prepared data contract | Apache-2.0 |
 | [HELMET](https://github.com/princeton-nlp/HELMET) at `af609c4d51b97fc35012099380aa889da961c42d` | HELMET preparation and scoring behavior | MIT |
 | [BigCodeBench](https://github.com/bigcode-project/bigcodebench) | execution environment and benchmark protocol | Apache-2.0 |

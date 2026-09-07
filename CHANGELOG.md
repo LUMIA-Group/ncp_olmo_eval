@@ -2,8 +2,16 @@
 
 ## Unreleased
 
+## 0.1.0a16
+
 - Make checkout-free release jobs pass the repository explicitly when attaching
   Python distributions and immutable OCI digest manifests to GitHub Releases.
+- Replace the unpublished `lm-evaluation-harness` Git direct reference with
+  the official `lm-eval==0.4.13` PyPI release. The pinned tag retains the same
+  GSM8K task files as the validated development commit, while making wheel and
+  source-distribution metadata acceptable to public package indexes.
+- Reject direct URL dependencies in the release metadata contract so PyPI
+  publication failures are caught before a tag is created.
 
 ## 0.1.0a15
 

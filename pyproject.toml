@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a15"
+version = "0.1.0a16"
 description = "Reproducible vLLM evaluation for OLMo and NCP-ArchPreview"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,12 +39,12 @@ vllm = [
   "vllm==0.13.0",
   "sympy==1.14.0",
   "antlr4-python3-runtime==4.11",
-  "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
+  "lm-eval==0.4.13",
 ]
 gsm8k = [
   "sympy==1.14.0",
   "antlr4-python3-runtime==4.11",
-  "lm_eval @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@95d580638385578c1c07fa554cf16ad7f5b5f460",
+  "lm-eval==0.4.13",
 ]
 scoring = [
   "sympy==1.14.0",
