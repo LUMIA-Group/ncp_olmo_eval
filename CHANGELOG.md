@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Make checkout-free release jobs pass the repository explicitly when attaching
+  Python distributions and immutable OCI digest manifests to GitHub Releases.
+
 ## 0.1.0a15
 
 - Accept NCP DFlash checkpoints published as Hugging Face sharded SafeTensors,

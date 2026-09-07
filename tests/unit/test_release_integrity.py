@@ -165,6 +165,9 @@ def test_release_workflows_use_oidc_and_pinned_actions() -> None:
     assert "packages: write" in images
     assert "scripts/build-public-images.sh" in images
     for workflow in (release, images):
+        assert 'gh release upload "$RELEASE_TAG"' in workflow
+        assert '--repo "$GITHUB_REPOSITORY"' in workflow
+    for workflow in (release, images):
         action_refs = [
             line.strip().split("uses:", 1)[1].strip()
             for line in workflow.splitlines()

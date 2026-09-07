@@ -159,4 +159,5 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             dist/public-images.env dist/public-images.json --clobber
