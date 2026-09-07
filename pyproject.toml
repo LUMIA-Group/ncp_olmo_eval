@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a14"
+version = "0.1.0a15"
 description = "Reproducible vLLM evaluation for OLMo and NCP-ArchPreview"
 readme = "README.md"
-requires-python = ">=3.12"
-license-files = ["LICENSE"]
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 authors = [
   {name = "NCP-ArchPreview contributors"},
 ]
@@ -16,6 +17,8 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: GPU :: NVIDIA CUDA",
   "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -51,6 +54,8 @@ dev = [
   "build>=1.2",
   "pytest>=8.3",
   "ruff>=0.9",
+  "tomli>=2.0; python_version < '3.11'",
+  "twine>=6.1",
 ]
 helmet = [
   "datasets>=3.0",

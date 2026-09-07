@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from ncp_olmo_eval import evaluation_cli
+from ncp_olmo_eval.dflash_checkpoint import dflash_checkpoint_identity
 from ncp_olmo_eval.task_spec import Resources, TaskSpec, read_status, read_task
 
 
@@ -49,6 +50,20 @@ def _draft_checkpoint(root: Path) -> Path:
     return draft
 
 
+def _sharded_draft_checkpoint(root: Path, *, shard_count: int = 21) -> Path:
+    draft = _draft_checkpoint(root)
+    (draft / "model.safetensors").unlink()
+    weight_map = {}
+    for index in range(1, shard_count + 1):
+        name = f"model-{index:05d}-of-{shard_count:05d}.safetensors"
+        (draft / name).write_bytes(f"draft-shard-{index}".encode())
+        weight_map[f"draft.layer.{index}.weight"] = name
+    (draft / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": weight_map}), encoding="utf-8"
+    )
+    return draft
+
+
 def _verification_artifact(
     root: Path,
     *,
@@ -56,8 +71,6 @@ def _verification_artifact(
     draft: Path,
     mode: str = "sequential_exact",
 ) -> Path:
-    config = draft / "config.json"
-    weights = draft / "model.safetensors"
     approximate = mode == "segmented_kv_approx"
     operating_point = {
         "schema_version": "ncp-dflash-operating-point-v1",
@@ -116,12 +129,7 @@ def _verification_artifact(
         },
         "speculative_operating_point": operating_point,
         "target_model_identity": {"source_model": str(target.resolve())},
-        "draft_model_identity": {
-            "path": str(draft.resolve()),
-            "config_sha256": evaluation_cli._sha256(config),
-            "weights_size": weights.stat().st_size,
-            "weights_mtime_ns": weights.stat().st_mtime_ns,
-        },
+        "draft_model_identity": dflash_checkpoint_identity(draft),
     }
     path = root / f"comparison-{mode}.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -179,6 +187,30 @@ def test_speculative_registration_is_target_and_draft_bound(tmp_path: Path) -> N
         evaluation_root, registration["registration_name"]
     )
     assert loaded["vllm_speculative_draft_model"] == str(draft.resolve())
+
+
+def test_speculative_registration_accepts_21_shard_hf_draft(tmp_path: Path) -> None:
+    evaluation_root = tmp_path / "evaluations"
+    checkpoint = _checkpoint(tmp_path)
+    draft = _sharded_draft_checkpoint(tmp_path)
+    verification = _verification_artifact(tmp_path, target=checkpoint, draft=draft)
+
+    registration = evaluation_cli.register_model(
+        root=evaluation_root,
+        checkpoint=checkpoint,
+        backend="vllm",
+        new_version=False,
+        vllm_speculative_draft_model=draft,
+        vllm_speculative_verification=verification,
+    )
+
+    sealed = registration["vllm_speculative_draft_validation"]
+    assert sealed["weight_file_count"] == 21
+    assert len(sealed["weight_files"]) == 21
+    _, loaded = evaluation_cli.load_registration(
+        evaluation_root, registration["registration_name"]
+    )
+    assert loaded["vllm_speculative_draft_validation"]["weight_index_sha256"]
 
 
 def test_approximate_speculative_registration_requires_opt_in(tmp_path: Path) -> None:

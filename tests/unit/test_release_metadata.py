@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import ast
 import re
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 CI job
+    import tomli as tomllib
 from pathlib import Path
 
 
@@ -26,7 +29,7 @@ def test_release_version_is_consistent_across_metadata() -> None:
     root = Path(__file__).resolve().parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     version = project["project"]["version"]
-    assert version == "0.1.0a14"
+    assert version == "0.1.0a15"
     assert _fallback_version(root / "src/ncp_olmo_eval/__init__.py") == version
 
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -39,4 +42,4 @@ def test_release_version_is_consistent_across_metadata() -> None:
     validation = (root / "docs/validation/dflash_a14_synthetic.json").read_text(
         encoding="utf-8"
     )
-    assert f'"release": "{version}"' in validation
+    assert '"release": "0.1.0a14"' in validation

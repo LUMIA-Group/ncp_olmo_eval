@@ -1,7 +1,1 @@
-{
-  "ghcr.io/your-org/ncp-olmo-eval@sha256:REPLACE_ME": "/shared/images/ncp-olmo-eval.sif",
-  "ghcr.io/your-org/core88-python@sha256:REPLACE_ME": "/shared/images/core88-python.sif",
-  "ghcr.io/your-org/core88-bigcodebench@sha256:REPLACE_ME": "/shared/images/core88-bigcodebench.sif",
-  "ghcr.io/your-org/core88-ds1000@sha256:REPLACE_ME": "/shared/images/core88-ds1000.sif",
-  "ghcr.io/your-org/core88-multiple@sha256:REPLACE_ME": "/shared/images/core88-multiple.sif"
-}
+{}

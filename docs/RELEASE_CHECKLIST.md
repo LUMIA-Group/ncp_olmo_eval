@@ -1,8 +1,7 @@
 # Release checklist
 
 Use this checklist from a clean checkout of the exact source revision intended
-for publication. It is deliberately separate from version selection: do not
-change the package version, create a tag, or publish an artifact until every
+for publication. Do not create a tag or publish an artifact until every
 applicable check below passes and the release revision is approved.
 
 ## 1. Source and protocol review
@@ -39,7 +38,8 @@ git diff --check
 
 ## 3. Host-side validation
 
-Use Python 3.12 and the same dependency constraints declared by the package:
+Use both Python 3.10 (the package floor) and Python 3.12 (the GPU runtime) with
+the dependency constraints declared by the package:
 
 ```bash
 python3.12 -m venv /tmp/ncp-olmo-eval-release-venv
@@ -54,6 +54,7 @@ find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 python -m py_compile scripts/*.py
 git diff --check
 python -m build
+python -m twine check dist/*
 ```
 
 ## 4. Distribution inspection
@@ -94,8 +95,9 @@ caches, results, virtual environments, or credentials.
   spec. An image hint without container isolation is not a valid code score.
 
 The checked-in GitHub Actions workflow performs CPU-buildable slices of these
-checks. A release owner must still verify CUDA/driver compatibility and the
-site's image publication process.
+checks. The image publication workflow builds the published recipes themselves
+from public pinned bases. A release owner must still verify CUDA/driver
+compatibility.
 
 ## 6. Model and benchmark smoke
 
@@ -136,13 +138,30 @@ the same prompts. The release smoke must additionally confirm:
 Do not publish private checkpoint paths or scheduler configuration as release
 defaults. Site-specific mounts belong in an external compatibility layer.
 
-## 7. Publication gate
+## 7. One-time publication setup
+
+- Create a PyPI pending Trusted Publisher for owner `LuckySJTU`, repository
+  `ncp_olmo_eval`, workflow `release.yml`, and environment `pypi`. Protect that
+  GitHub environment with required reviewers if desired.
+- Verify that the package name `ncp-olmo-eval` is available or owned by the
+  project maintainers.
+- After the first image workflow push, change all five GHCR packages to Public.
+  A public source repository does not make package visibility public
+  automatically.
+- Keep PyPI API tokens out of repository secrets. The release workflow uses
+  short-lived OIDC credentials through Trusted Publishing.
+
+## 8. Publication gate
 
 Only after all applicable checks pass:
 
 - record the approved source commit and source-tree SHA-256;
 - update the version and changelog if the approved release requires it;
 - build artifacts again from that exact clean revision;
-- sign/tag/publish according to the project release policy;
+- create an immutable `v<version>` tag and publish the GitHub release;
+- let `release.yml` build and publish the wheel/sdist to PyPI through Trusted
+  Publishing, and let `publish-images.yml` publish the five OCI images;
 - verify the published wheel/image digest and the installed CLI;
+- verify `public-images.env` contains five `tag@sha256:...` references and is
+  attached to the GitHub release;
 - preserve the release test evidence without publishing private paths or data.

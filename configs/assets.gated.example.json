@@ -1,0 +1,19 @@
+{
+  "schema_version": "ncp-olmo-eval-assets-v1",
+  "assets": [
+    {
+      "name": "helmet-llama2-tokenizer",
+      "repo_id": "meta-llama/Llama-2-7b-hf",
+      "repo_type": "model",
+      "revision": "01c7f73d771dfac7d292323805ebc428287df4f9",
+      "allow_patterns": [
+        "LICENSE.txt",
+        "USE_POLICY.md",
+        "tokenizer.json",
+        "tokenizer.model",
+        "tokenizer_config.json",
+        "special_tokens_map.json"
+      ]
+    }
+  ]
+}

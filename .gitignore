@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 build/
 dist/
+.image-build/
 .DS_Store
 *.env
 !configs/*.env.example

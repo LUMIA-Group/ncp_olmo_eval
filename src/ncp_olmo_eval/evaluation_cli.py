@@ -31,6 +31,7 @@ from .core_native_contract import (
     CORE88_LOCAL_DISPATCH,
     CORE88_PLAN_SCHEMA,
 )
+from .dflash_checkpoint import dflash_checkpoint_identity, dflash_identity_matches
 from .dflash_contract import (
     dflash_operating_point_env,
     validate_dflash_operating_point,
@@ -503,14 +504,9 @@ def _validate_dflash_verification(
     ).resolve() != checkpoint_path.resolve():
         raise EvaluationError("NCP DFlash correctness artifact 与当前 target 不匹配")
     draft_identity = verification.get("draft_model_identity")
-    expected_draft = {
-        "path": str(draft_model.resolve()),
-        "config_sha256": draft_validation["config_sha256"],
-        "weights_size": draft_validation["weights_size"],
-        "weights_mtime_ns": draft_validation["weights_mtime_ns"],
-    }
-    if not isinstance(draft_identity, dict) or any(
-        draft_identity.get(key) != value for key, value in expected_draft.items()
+    expected_draft = {"path": str(draft_model.resolve()), **draft_validation}
+    if not isinstance(draft_identity, dict) or not dflash_identity_matches(
+        draft_identity, expected_draft
     ):
         raise EvaluationError("NCP DFlash correctness artifact 与当前 draft 不匹配")
     return {
@@ -594,12 +590,10 @@ def register_model(
             raise EvaluationError("NCP DFlash 只支持 vllm backend 注册")
         resolved_draft_model = vllm_speculative_draft_model.expanduser().resolve()
         draft_config_path = resolved_draft_model / "config.json"
-        draft_weights_path = resolved_draft_model / "model.safetensors"
-        if not draft_config_path.is_file() or not draft_weights_path.is_file():
-            raise EvaluationError(
-                "NCP DFlash 目录必须包含 config.json 和 model.safetensors："
-                f"{resolved_draft_model}"
-            )
+        try:
+            draft_identity = dflash_checkpoint_identity(resolved_draft_model)
+        except (OSError, ValueError) as error:
+            raise EvaluationError(f"NCP DFlash checkpoint 不完整：{error}") from error
         draft_config = _read_json(draft_config_path)
         expected = {
             "model_type": "conceptlm_dflash",
@@ -616,9 +610,7 @@ def register_model(
         if mismatched:
             raise EvaluationError(f"NCP DFlash 配置不符合已验证合同：{mismatched}")
         draft_validation = {
-            "config_sha256": _sha256(draft_config_path),
-            "weights_size": draft_weights_path.stat().st_size,
-            "weights_mtime_ns": draft_weights_path.stat().st_mtime_ns,
+            **{key: value for key, value in draft_identity.items() if key != "path"},
             "block_size": int(draft_config["block_size"]),
             **expected,
         }
@@ -722,19 +714,17 @@ def load_registration(root: Path, name: str) -> tuple[Path, dict[str, Any]]:
     draft_value = str(metadata.get("vllm_speculative_draft_model", ""))
     if draft_value:
         draft_root = Path(draft_value)
-        draft_config_path = draft_root / "config.json"
-        draft_weights_path = draft_root / "model.safetensors"
-        if not draft_config_path.is_file() or not draft_weights_path.is_file():
-            raise EvaluationError(f"注册的 NCP DFlash checkpoint 已不完整：{draft_root}")
         validation = metadata.get("vllm_speculative_draft_validation")
-        current = {
-            "config_sha256": _sha256(draft_config_path),
-            "weights_size": draft_weights_path.stat().st_size,
-            "weights_mtime_ns": draft_weights_path.stat().st_mtime_ns,
-        }
-        if not isinstance(validation, dict) or any(
-            validation.get(key) != value for key, value in current.items()
-        ):
+        try:
+            current = dflash_checkpoint_identity(draft_root)
+        except (OSError, ValueError) as error:
+            raise EvaluationError(f"注册的 NCP DFlash checkpoint 已不完整：{error}") from error
+        stored_identity = (
+            {"path": str(draft_root.resolve()), **validation}
+            if isinstance(validation, dict)
+            else {}
+        )
+        if not dflash_identity_matches(stored_identity, current):
             raise EvaluationError("NCP DFlash checkpoint 自注册后发生变化，请新注册版本")
         verification = metadata.get("vllm_speculative_verification")
         if verification is not None:

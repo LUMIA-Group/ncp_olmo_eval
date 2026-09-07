@@ -1,5 +1,6 @@
-include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md LICENSE
-recursive-include configs *.example *.example.json
+include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md THIRD_PARTY_NOTICES.md LICENSE NOTICE
+recursive-include configs *.env.example *.json
+recursive-include .github/workflows *.yml
 recursive-include docs *.md *.json
 recursive-include docker *.Dockerfile
 recursive-include scripts *.py *.sh

@@ -106,6 +106,20 @@ def _draft_checkpoint(tmp_path: Path) -> Path:
     return draft
 
 
+def _sharded_draft_checkpoint(tmp_path: Path, *, shard_count: int = 21) -> Path:
+    draft = _draft_checkpoint(tmp_path)
+    (draft / "model.safetensors").unlink()
+    weight_map = {}
+    for index in range(1, shard_count + 1):
+        name = f"model-{index:05d}-of-{shard_count:05d}.safetensors"
+        (draft / name).write_bytes(f"fixture-{index}".encode())
+        weight_map[f"draft.layer.{index}.weight"] = name
+    (draft / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": weight_map}) + "\n", encoding="utf-8"
+    )
+    return draft
+
+
 def test_core88_engine_capacity_covers_scoring_and_generation_batches() -> None:
     assert (
         _max_inference_batch_size(SimpleNamespace(score_batch_size=8, generation_batch_size=1)) == 8
@@ -340,6 +354,23 @@ def test_native_vllm_manifest_seals_dflash_identity(tmp_path: Path) -> None:
     assert manifest["speculative_draft_identity"]["weights_size"] > 0
 
 
+def test_native_vllm_manifest_accepts_and_seals_21_shard_dflash(tmp_path: Path) -> None:
+    draft = _sharded_draft_checkpoint(tmp_path)
+    args = SimpleNamespace(
+        vllm_speculative_draft_model=str(draft),
+        vllm_speculative_num_tokens=8,
+        vllm_speculative_telemetry_path="",
+        vllm_speculative_verification_mode="sequential_exact",
+    )
+
+    manifest = native_vllm_speculative_manifest(args)
+
+    identity = manifest["speculative_draft_identity"]
+    assert identity["weight_index"] == "model.safetensors.index.json"
+    assert identity["weight_file_count"] == 21
+    assert len(identity["weight_sizes"]) == 21
+
+
 def test_native_vllm_marks_segmented_cache_mode_as_approximate(tmp_path: Path) -> None:
     draft = _draft_checkpoint(tmp_path)
     inferencer = NativeVLLMInferencer(
@@ -526,6 +557,21 @@ def test_native_vllm_contract_validates_dflash_checkpoint(tmp_path: Path) -> Non
     (draft / "model.safetensors").unlink()
     with pytest.raises(ValueError, match="missing model.safetensors"):
         validate_native_vllm_args(args, batch_size=8, processes_per_gpu=1)
+
+
+def test_native_vllm_contract_accepts_sharded_dflash_checkpoint(tmp_path: Path) -> None:
+    draft = _sharded_draft_checkpoint(tmp_path)
+    args = SimpleNamespace(
+        hf_backend="native_vllm",
+        allow_unverified_native_vllm=True,
+        vllm_max_model_len=8192,
+        vllm_gpu_memory_utilization=0.85,
+        vllm_model_family="conceptlm",
+        vllm_speculative_draft_model=str(draft),
+        vllm_speculative_num_tokens=16,
+    )
+
+    validate_native_vllm_args(args, batch_size=8, processes_per_gpu=1)
 
 
 def _native_runtime_config() -> dict[str, object]:

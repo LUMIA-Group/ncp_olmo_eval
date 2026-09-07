@@ -2,16 +2,32 @@
 
 ## Unreleased
 
+- Accept NCP DFlash checkpoints published as Hugging Face sharded SafeTensors,
+  validate every file referenced by `model.safetensors.index.json`, and seal
+  the full shard identity while retaining one-file checkpoint compatibility.
+
+## 0.1.0a15
+
 - Adopt **NCP-ArchPreview** as the public model-family name throughout the
   documentation and package metadata while retaining existing distribution,
   import, CLI, environment-variable, schema, and model-config identifiers for
   backward compatibility.
 - Document the public Stage1, Stage2 v1/v2/v3, and Stage2 DFlash2 NCPFlash
   checkpoints published by the ArchSpace Collection on Hugging Face.
+- Re-license original repository code under Apache-2.0 and separate upstream
+  attribution and asset terms into `NOTICE` and `THIRD_PARTY_NOTICES.md`.
+- Pin the public upstream OCI bases used by the validated Core88 sandboxes and
+  add release automation that publishes runtime and scorer images to GHCR with
+  an immutable digest manifest.
+- Add a PyPI Trusted Publishing workflow that builds once, validates the wheel
+  and source distribution, and publishes through GitHub OIDC without a stored
+  API token.
+- Replace asset and image placeholders with pinned public references or an
+  explicit gated-asset boundary, and document the one-time publisher setup.
 
 ## 0.1.0a14
 
-- Publish the final alpha validation record for the sealed NCP DFlash
+- Publish the a14 validation record for the sealed NCP DFlash
   continuous-batching operating point introduced in `0.1.0a13`, without
   changing the inference or scoring protocols.
 - Record both the fixed active-batch/draft-width sweep and a mixed-length

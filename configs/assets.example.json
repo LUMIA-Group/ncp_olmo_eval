@@ -5,8 +5,22 @@
       "name": "helmet-autoais",
       "repo_id": "google/t5_xxl_true_nli_mixture",
       "repo_type": "model",
-      "revision": "REPLACE_WITH_FULL_COMMIT_SHA",
-      "allow_patterns": ["*.json", "*.model", "*.safetensors", "*.txt"]
+      "revision": "aa6cfe1dd4257853bfdd772992045f41bfc14988",
+      "allow_patterns": ["*.json", "*.model", "*.bin", "*.safetensors", "*.txt"]
+    },
+    {
+      "name": "ruler-data",
+      "repo_id": "allenai/ruler_data",
+      "repo_type": "dataset",
+      "revision": "b2d1d948dc4f6ca37c0135123f3b3afbed741130",
+      "allow_patterns": ["README.md", "data_100_samples.tgz"]
+    },
+    {
+      "name": "helmet-classic-data",
+      "repo_id": "princeton-nlp/HELMET",
+      "repo_type": "dataset",
+      "revision": "bc560a6b8165c696ad4bc3d1612c64b5794ba328",
+      "allow_patterns": ["README.md", "data.tar.gz"]
     }
   ]
 }

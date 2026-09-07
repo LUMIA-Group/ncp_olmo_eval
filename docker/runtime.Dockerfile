@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-ARG BASE_IMAGE
+ARG BASE_IMAGE=vllm/vllm-openai@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
 FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_REVISION=unknown
+ARG RELEASE_VERSION=0.1.0a15
 ARG PYTHON_BIN=python3
 ARG INSTALL_EXTRAS=vllm,helmet,scoring
 
@@ -29,6 +30,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.version="${RELEASE_VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.description="Portable vLLM runtime for NCP-ArchPreview evaluation"
 
 ENTRYPOINT []

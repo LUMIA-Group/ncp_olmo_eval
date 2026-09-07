@@ -1,0 +1,20 @@
+{
+  "schema_version": "ncp-olmo-eval-public-images-v1",
+  "release_version": "0.1.0a15",
+  "source_repository": "https://github.com/LuckySJTU/ncp_olmo_eval",
+  "upstream_bases": {
+    "runtime": "vllm/vllm-openai@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b",
+    "core88_python": "python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+    "core88_bigcodebench": "bigcodebench/bigcodebench-gradio@sha256:3ca66b54f218649aff5f4e1f54e4d0f43fdb9632d65a08010264b2608e3faec8",
+    "core88_ds1000": "python:3.10.13-slim-bookworm@sha256:1326d0fd281d283b077fd249e618339a44c9ca5aae6e05cb4f069a087e827922",
+    "core88_multiple": "ghcr.io/nuprl/multipl-e-evaluation@sha256:8e8aed978fc7817fa51afb2e35b240de734fbbca2df41102f196bc54f7e8218c"
+  },
+  "release_tags": {
+    "NCP_OLMO_EVAL_IMAGE": "ghcr.io/luckysjtu/ncp-olmo-eval-runtime:0.1.0a15",
+    "CORE88_PYTHON_IMAGE": "ghcr.io/luckysjtu/ncp-olmo-eval-core88-python:0.1.0a15",
+    "CORE88_BIGCODEBENCH_IMAGE": "ghcr.io/luckysjtu/ncp-olmo-eval-core88-bigcodebench:0.1.0a15",
+    "CORE88_DS1000_IMAGE": "ghcr.io/luckysjtu/ncp-olmo-eval-core88-ds1000:0.1.0a15",
+    "CORE88_MULTIPLE_IMAGE": "ghcr.io/luckysjtu/ncp-olmo-eval-core88-multiple:0.1.0a15"
+  },
+  "formal_evaluation_note": "Resolve release tags to the immutable digest values in the public-images.env release asset before creating a formal task plan."
+}

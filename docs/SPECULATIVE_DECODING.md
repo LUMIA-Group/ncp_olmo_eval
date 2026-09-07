@@ -8,15 +8,16 @@ model. Installed vLLM files are not patched.
 Version 0.1.0a13 additionally seals and replays the full batch, scheduler
 queue, adaptive draft-width, target-runtime, and draft-runtime operating point.
 
-Version 0.1.0a14 is the final alpha validation release. It does not change that
+Version 0.1.0a14 is the retained alpha validation baseline. It does not change that
 operating point or any benchmark protocol; it adds a sanitized performance and
 quality record in [VALIDATION.md](VALIDATION.md) plus release-metadata checks.
 
 This path is fail-closed:
 
 - the target must use the packaged NCP-ArchPreview vLLM plugin;
-- the draft directory must contain `config.json` and one
-  `model.safetensors`;
+- the draft directory must contain `config.json` and either one
+  `model.safetensors` or a Hugging Face `model.safetensors.index.json` plus all
+  referenced SafeTensors shards;
 - the draft architecture and target-layer contract are validated at
   registration;
 - formal inference requires a target/draft-bound A/B artifact produced by the

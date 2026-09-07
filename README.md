@@ -1,9 +1,11 @@
 # ncp_olmo_eval
 
-`ncp_olmo_eval` is a scheduler-neutral, vLLM-only evaluation workflow for
-stock OLMo and NCP-ArchPreview checkpoints. One CLI covers immutable model
-registration, inference planning, scoring, artifact validation, and final
-result materialization for GSM8K, SciQ, Core88, RULER, and HELMET.
+`ncp_olmo_eval` is a reproducible, scheduler-neutral evaluation toolkit for
+stock OLMo and NCP-ArchPreview checkpoints on vLLM. One fail-closed CLI covers
+immutable model registration, inference planning, sandboxed scoring, artifact
+validation, and final result materialization for GSM8K, SciQ, Core88, RULER,
+and HELMET. Public pinned assets, OCI build recipes, and scheduler adapters let
+the same protocol run on a workstation, Slurm, Kubernetes, or another cluster.
 
 The distribution name `ncp-olmo-eval`, Python package `ncp_olmo_eval`, CLI
 commands, and `NCP_OLMO_*` environment variables are retained as stable
@@ -52,7 +54,7 @@ See [the exact protocol pins](docs/PROTOCOLS.md) before comparing results.
 |---|---|---|
 | Stock OLMo | vLLM built-in implementation | local Hugging Face-compatible directory |
 | NCP-ArchPreview | installed `vllm.general_plugins` entry point | pure-HF config/tokenizer plus complete safetensors or bin shards |
-| NCP DFlash draft | packaged vLLM 0.13 proposer adapter | remote-code draft config plus one `model.safetensors` |
+| NCP DFlash draft | packaged vLLM 0.13 proposer adapter | remote-code draft config plus either one `model.safetensors` or a Hugging Face `model.safetensors.index.json` with all referenced shards |
 
 Registration checks, without modifying the checkpoint:
 
@@ -88,6 +90,14 @@ backend parity claim.
 
 ## Install
 
+After the alpha is published to PyPI:
+
+```bash
+python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0a15'
+```
+
+Until then, or when validating a source revision, install from a clean checkout:
+
 For the complete GPU runtime:
 
 ```bash
@@ -117,11 +127,15 @@ for reproducible OCI and Core88 sandbox builds.
 ## Prepare a portable environment
 
 1. Copy [`configs/runtime.env.example`](configs/runtime.env.example) to a
-   private runtime file and replace every placeholder with a shared path or an
-   immutable OCI digest.
-2. Pin external Hugging Face assets in a private copy of
-   [`configs/assets.example.json`](configs/assets.example.json).
-3. Download assets once on a connected host, seal them, then verify the sealed
+   private runtime file and replace shared paths for your site.
+2. Download `public-images.env` from the matching GitHub release and source it
+   to select the published immutable OCI digests. Public bases and release tags
+   are listed in [`configs/public-image-bases.json`](configs/public-image-bases.json).
+3. Use the already pinned public Hugging Face assets in
+   [`configs/assets.example.json`](configs/assets.example.json). The gated
+   Llama 2 tokenizer is deliberately separate in
+   [`configs/assets.gated.example.json`](configs/assets.gated.example.json).
+4. Download assets once on a connected host, seal them, then verify the sealed
    bundle before formal work:
 
 ```bash
@@ -183,7 +197,7 @@ batch, continuous scheduler queue, adaptive draft-width map, and target/draft
 runtime settings. Legacy a12 artifacts that only prove output correctness are
 rejected rather than silently run at a different operating point.
 
-The final alpha's matched H200 validation, including the `1.43x`
+The retained a14 matched-H200 validation, including the `1.43x`
 mixed-length continuous-queue result, fixed batch/width sweep, cold-start cost,
 and downstream-quality caveats, is recorded in
 [VALIDATION.md](docs/VALIDATION.md). These measurements describe one tested
@@ -302,6 +316,8 @@ git diff --check
 The CI workflow additionally installs the built wheel at a different path,
 validates source-identity-aware Core88 finalization, builds the published
 runtime scorer slice, and executes the formal BigCodeBench sandbox smoke.
+Release workflows publish the wheel through PyPI Trusted Publishing and build
+the five public OCI images from pinned public inputs.
 
 ## Alpha limitations
 
@@ -332,5 +348,10 @@ runtime scorer slice, and executes the formal BigCodeBench sandbox smoke.
 
 ## License
 
-See [`LICENSE`](LICENSE) and
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Original repository code is licensed under
+[Apache License 2.0](LICENSE). Third-party code, benchmark data, model weights,
+and container bases retain their own terms; in particular, the MultiPL-E
+runtime has an additional machine-learning-training restriction. See
+[`NOTICE`](NOTICE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+The repository license does not license NCP-ArchPreview weights; each Hugging
+Face model card must declare its independently reviewed weight license.
