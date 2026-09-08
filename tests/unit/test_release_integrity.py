@@ -138,7 +138,7 @@ def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
     images = json.loads(
         (root / "configs/public-image-bases.json").read_text(encoding="utf-8")
     )
-    assert images["release_version"] == "0.1.0a16"
+    assert images["release_version"] == "0.1.0"
     assert len(images["upstream_bases"]) == 5
     assert all(
         len(value.rsplit("@sha256:", 1)[-1]) == 64
@@ -146,7 +146,7 @@ def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
     )
     assert all(
         value.startswith("ghcr.io/luckysjtu/ncp-olmo-eval-")
-        and value.endswith(":0.1.0a16")
+        and value.endswith(":0.1.0")
         for value in images["release_tags"].values()
     )
 

@@ -1,7 +1,7 @@
 # Evaluation protocols
 
 This document describes the benchmark protocol introduced by `v0.1.0a1` and
-retained by the scheduler-neutral `v0.1.0a16` work. Result metadata is
+retained by the scheduler-neutral `v0.1.0` work. Result metadata is
 authoritative when it is more specific than this overview.
 
 ## Common contract

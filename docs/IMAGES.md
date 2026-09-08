@@ -1,14 +1,14 @@
 # Public OCI images
 
-Release `v0.1.0a16` defines five Linux/amd64 images:
+Release `v0.1.0` defines five Linux/amd64 images:
 
 | Task | Public release tag |
 |---|---|
-| vLLM inference and non-code scoring | `ghcr.io/luckysjtu/ncp-olmo-eval-runtime:0.1.0a16` |
-| Core88 Python execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-python:0.1.0a16` |
-| BigCodeBench execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-bigcodebench:0.1.0a16` |
-| DS-1000 execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-ds1000:0.1.0a16` |
-| MultiPL-E execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-multiple:0.1.0a16` |
+| vLLM inference and non-code scoring | `ghcr.io/luckysjtu/ncp-olmo-eval-runtime:0.1.0` |
+| Core88 Python execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-python:0.1.0` |
+| BigCodeBench execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-bigcodebench:0.1.0` |
+| DS-1000 execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-ds1000:0.1.0` |
+| MultiPL-E execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-multiple:0.1.0` |
 
 Tags make images discoverable; formal evaluations must use the immutable
 `tag@sha256:...` values in the matching release's `public-images.env` or

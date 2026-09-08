@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0a16"
+version = "0.1.0"
 description = "Reproducible vLLM evaluation for OLMo and NCP-ArchPreview"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ authors = [
   {name = "NCP-ArchPreview contributors"},
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: GPU :: NVIDIA CUDA",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3.10",

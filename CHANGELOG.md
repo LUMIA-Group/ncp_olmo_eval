@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.0
+
+- Promote the validated `0.1.0a16` source and protocol contract to the first
+  stable release without changing benchmark semantics.
+- Publish stable PyPI and GHCR coordinates while retaining immutable release
+  manifests, fail-closed artifact validation, and the separately gated
+  experimental DFlash path.
+
 ## 0.1.0a16
 
 - Make checkout-free release jobs pass the repository explicitly when attaching

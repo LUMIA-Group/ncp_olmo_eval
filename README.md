@@ -17,9 +17,10 @@ specifications that can run in an existing allocation or through a thin Slurm,
 Kubernetes, or site-specific adapter. The published tree contains no private
 mount, registry, proxy, account, credential, checkpoint, or scheduler default.
 
-> **Status:** alpha. The public runtime supports vLLM only. Benchmark protocols
-> and artifact checks are fail-closed; changing a seed, prompt, prepared-data
-> identity, model identity, or source revision requires a new evaluation.
+> **Status:** stable `0.1.0`. The public runtime supports vLLM only. Benchmark
+> protocols and artifact checks are fail-closed; changing a seed, prompt,
+> prepared-data identity, model identity, or source revision requires a new
+> evaluation.
 
 ## What is supported
 
@@ -82,7 +83,7 @@ The paired speculative-decoding draft is
 [NCP_ArchPreview_dolma3_8.9B_Stage2_DFlash2_NCPFlash](https://huggingface.co/ArchSpace-Collection/NCP_ArchPreview_dolma3_8.9B_Stage2_DFlash2_NCPFlash).
 
 The current pinned runtime is Python 3.12, vLLM 0.13.0,
-Transformers 4.57.6, and `huggingface-hub` 0.36.2. Pre-release load smoke has
+Transformers 4.57.6, and `huggingface-hub` 0.36.2. Release load smoke has
 also covered 17 local NCP-ArchPreview HF exports (14 Stage1 and three Stage2): every
 checkpoint loaded and produced a non-empty greedy continuation with the pinned
 runtime. That evidence is a load/route smoke, not a benchmark score or native
@@ -90,13 +91,13 @@ backend parity claim.
 
 ## Install
 
-After the alpha is published to PyPI:
+Install the stable release from PyPI:
 
 ```bash
-python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0a16'
+python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0'
 ```
 
-Until then, or when validating a source revision, install from a clean checkout:
+When validating a source revision, install from a clean checkout:
 
 For the complete GPU runtime:
 
@@ -320,7 +321,7 @@ runtime scorer slice, and executes the formal BigCodeBench sandbox smoke.
 Release workflows publish the wheel through PyPI Trusted Publishing and build
 the five public OCI images from pinned public inputs.
 
-## Alpha limitations
+## Current limitations
 
 - Only vLLM is exposed by the public unified workflow.
 - NCP DFlash is pinned to vLLM 0.13.0, is opt-in, and is formally routed only
