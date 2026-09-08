@@ -6,7 +6,7 @@ FROM ${BASE_IMAGE}
 ARG BASE_REFERENCE=bigcodebench/bigcodebench-gradio@sha256:3ca66b54f218649aff5f4e1f54e4d0f43fdb9632d65a08010264b2608e3faec8
 ARG CORE88_UPSTREAM_REFERENCE=allenai/OLMo-Eval@f8816eea36563f27b4a9dd2533d68d34f3c67d3f
 ARG CORE88_SCORER_COMMIT=unknown
-ARG RELEASE_VERSION=0.1.0
+ARG RELEASE_VERSION=0.1.1
 ARG TREE_SITTER_WHEEL=.image-build/tree_sitter-0.25.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
 ARG TREE_SITTER_SHA256=20b570690f87f1da424cd690e51cc56728d21d63f4abd4b326d382a30353acc7
 ARG TREE_SITTER_PYTHON_WHEEL=.image-build/tree_sitter_python-0.25.0-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl
@@ -57,7 +57,7 @@ RUN python3 -m pip install --no-cache-dir --no-deps . \
  && python3 -c 'import tree_sitter, tree_sitter_python' \
  && python3 -c 'import ncp_olmo_eval; print(ncp_olmo_eval.__version__)'
 
-LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
+LABEL org.opencontainers.image.source="https://github.com/LUMIA-Group/ncp_olmo_eval" \
       org.opencontainers.image.description="Pinned BigCodeBench scorer over the official public runtime" \
       org.opencontainers.image.base.name="${BASE_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \

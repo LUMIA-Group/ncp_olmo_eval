@@ -7,7 +7,7 @@ ARG CORE88_RUNTIME_NAME=core88-python
 ARG CORE88_RUNTIME_PREFIX=/usr
 ARG CORE88_UPSTREAM_REFERENCE=python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
 ARG CORE88_SCORER_COMMIT=unknown
-ARG RELEASE_VERSION=0.1.0
+ARG RELEASE_VERSION=0.1.1
 ARG PACKAGE_PYTHON=/usr/local/bin/python3
 ARG http_proxy
 ARG https_proxy
@@ -41,7 +41,7 @@ RUN "${PACKAGE_PYTHON}" -m pip install --no-cache-dir --no-deps . \
 
 ENV CORE88_RUNTIME_PREFIX=${CORE88_RUNTIME_PREFIX}
 
-LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
+LABEL org.opencontainers.image.source="https://github.com/LUMIA-Group/ncp_olmo_eval" \
       org.opencontainers.image.description="Pinned Core88 bubblewrap scorer runtime" \
       org.opencontainers.image.base.name="${CORE88_UPSTREAM_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \

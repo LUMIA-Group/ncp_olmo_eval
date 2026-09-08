@@ -140,7 +140,7 @@ defaults. Site-specific mounts belong in an external compatibility layer.
 
 ## 7. One-time publication setup
 
-- Create a PyPI pending Trusted Publisher for owner `LuckySJTU`, repository
+- Create or update the PyPI Trusted Publisher for owner `LUMIA-Group`, repository
   `ncp_olmo_eval`, workflow `release.yml`, and environment `pypi`. Protect that
   GitHub environment with required reviewers if desired.
 - Verify that the package name `ncp-olmo-eval` is available or owned by the

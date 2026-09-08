@@ -17,7 +17,7 @@ specifications that can run in an existing allocation or through a thin Slurm,
 Kubernetes, or site-specific adapter. The published tree contains no private
 mount, registry, proxy, account, credential, checkpoint, or scheduler default.
 
-> **Status:** stable `0.1.0`. The public runtime supports vLLM only. Benchmark
+> **Status:** stable `0.1.1`. The public runtime supports vLLM only. Benchmark
 > protocols and artifact checks are fail-closed; changing a seed, prompt,
 > prepared-data identity, model identity, or source revision requires a new
 > evaluation.
@@ -94,7 +94,7 @@ backend parity claim.
 Install the stable release from PyPI:
 
 ```bash
-python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.0'
+python -m pip install 'ncp-olmo-eval[vllm,helmet,scoring]==0.1.1'
 ```
 
 When validating a source revision, install from a clean checkout:

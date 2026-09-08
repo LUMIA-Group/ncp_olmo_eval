@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.1.0}"
-REGISTRY="${REGISTRY:-ghcr.io/luckysjtu}"
+VERSION="${VERSION:-0.1.1}"
+REGISTRY="${REGISTRY:-ghcr.io/lumia-group}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 PUSH="${PUSH:-0}"
 SOURCE_REVISION="${SOURCE_REVISION:-$(git rev-parse HEAD)}"

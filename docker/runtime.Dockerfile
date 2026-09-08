@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_REVISION=unknown
-ARG RELEASE_VERSION=0.1.0
+ARG RELEASE_VERSION=0.1.1
 ARG PYTHON_BIN=python3
 ARG INSTALL_EXTRAS=vllm,helmet,scoring
 
@@ -28,7 +28,7 @@ ENV PYTHONUNBUFFERED=1 \
     HF_DATASETS_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1
 
-LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
+LABEL org.opencontainers.image.source="https://github.com/LUMIA-Group/ncp_olmo_eval" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.version="${RELEASE_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0" \

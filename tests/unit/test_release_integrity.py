@@ -138,15 +138,16 @@ def test_public_assets_and_image_bases_are_exact_and_placeholder_free() -> None:
     images = json.loads(
         (root / "configs/public-image-bases.json").read_text(encoding="utf-8")
     )
-    assert images["release_version"] == "0.1.0"
+    assert images["release_version"] == "0.1.1"
+    assert images["source_repository"] == "https://github.com/LUMIA-Group/ncp_olmo_eval"
     assert len(images["upstream_bases"]) == 5
     assert all(
         len(value.rsplit("@sha256:", 1)[-1]) == 64
         for value in images["upstream_bases"].values()
     )
     assert all(
-        value.startswith("ghcr.io/luckysjtu/ncp-olmo-eval-")
-        and value.endswith(":0.1.0")
+        value.startswith("ghcr.io/lumia-group/ncp-olmo-eval-")
+        and value.endswith(":0.1.1")
         for value in images["release_tags"].values()
     )
 
@@ -177,6 +178,7 @@ def test_release_workflows_use_oidc_and_pinned_actions() -> None:
     assert "pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33" in release
     assert "password:" not in release
     assert "packages: write" in images
+    assert "REGISTRY: ghcr.io/lumia-group" in images
     assert "scripts/build-public-images.sh" in images
     for workflow in (release, images):
         assert 'gh release upload "$RELEASE_TAG"' in workflow

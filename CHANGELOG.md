@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.1
+
+- Move the canonical source repository to `LUMIA-Group/ncp_olmo_eval` and
+  update project links, OCI source labels, release documentation, and the
+  default GHCR publication namespace.
+- Retain the `0.1.0` benchmark and artifact contracts without protocol or
+  scoring changes; historical `0.1.0` release assets continue to reference
+  their original immutable image digests.
+
 ## 0.1.0
 
 - Promote the validated `0.1.0a16` source and protocol contract to the first

@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 
 ARG CORE88_UPSTREAM_REFERENCE=python:3.10.13-slim-bookworm@sha256:1326d0fd281d283b077fd249e618339a44c9ca5aae6e05cb4f069a087e827922
 ARG CORE88_SCORER_COMMIT=unknown
-ARG RELEASE_VERSION=0.1.0
+ARG RELEASE_VERSION=0.1.1
 
 USER root
 
@@ -88,7 +88,7 @@ PY
 ENV CORE88_RUNTIME_PREFIX=/opt/core88/ds1000/python \
     NCP_OLMO_SOURCE_REVISION=${CORE88_SCORER_COMMIT}
 
-LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
+LABEL org.opencontainers.image.source="https://github.com/LUMIA-Group/ncp_olmo_eval" \
       org.opencontainers.image.description="Reproducible DS-1000 scorer runtime built from public packages" \
       org.opencontainers.image.base.name="${CORE88_UPSTREAM_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \

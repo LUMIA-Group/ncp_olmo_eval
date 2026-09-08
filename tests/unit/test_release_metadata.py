@@ -29,7 +29,11 @@ def test_release_version_is_consistent_across_metadata() -> None:
     root = Path(__file__).resolve().parents[2]
     project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     version = project["project"]["version"]
-    assert version == "0.1.0"
+    assert version == "0.1.1"
+    assert project["project"]["urls"] == {
+        "Repository": "https://github.com/LUMIA-Group/ncp_olmo_eval",
+        "Issues": "https://github.com/LUMIA-Group/ncp_olmo_eval/issues",
+    }
     assert _fallback_version(root / "src/ncp_olmo_eval/__init__.py") == version
 
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")

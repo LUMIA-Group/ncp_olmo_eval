@@ -1,14 +1,18 @@
 # Public OCI images
 
-Release `v0.1.0` defines five Linux/amd64 images:
+Release `v0.1.1` defines five Linux/amd64 images:
 
 | Task | Public release tag |
 |---|---|
-| vLLM inference and non-code scoring | `ghcr.io/luckysjtu/ncp-olmo-eval-runtime:0.1.0` |
-| Core88 Python execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-python:0.1.0` |
-| BigCodeBench execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-bigcodebench:0.1.0` |
-| DS-1000 execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-ds1000:0.1.0` |
-| MultiPL-E execution | `ghcr.io/luckysjtu/ncp-olmo-eval-core88-multiple:0.1.0` |
+| vLLM inference and non-code scoring | `ghcr.io/lumia-group/ncp-olmo-eval-runtime:0.1.1` |
+| Core88 Python execution | `ghcr.io/lumia-group/ncp-olmo-eval-core88-python:0.1.1` |
+| BigCodeBench execution | `ghcr.io/lumia-group/ncp-olmo-eval-core88-bigcodebench:0.1.1` |
+| DS-1000 execution | `ghcr.io/lumia-group/ncp-olmo-eval-core88-ds1000:0.1.1` |
+| MultiPL-E execution | `ghcr.io/lumia-group/ncp-olmo-eval-core88-multiple:0.1.1` |
+
+The immutable `v0.1.0` release manifest continues to reference the original
+`ghcr.io/luckysjtu` images. Those historical coordinates must remain public;
+they are not rewritten by this repository transfer.
 
 Tags make images discoverable; formal evaluations must use the immutable
 `tag@sha256:...` values in the matching release's `public-images.env` or

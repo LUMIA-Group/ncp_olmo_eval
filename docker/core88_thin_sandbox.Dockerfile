@@ -7,7 +7,7 @@ ARG CORE88_RUNTIME_NAME=core88-multiple
 ARG CORE88_RUNTIME_PREFIX=/usr
 ARG CORE88_UPSTREAM_REFERENCE=ghcr.io/nuprl/multipl-e-evaluation@sha256:8e8aed978fc7817fa51afb2e35b240de734fbbca2df41102f196bc54f7e8218c
 ARG CORE88_SCORER_COMMIT=unknown
-ARG RELEASE_VERSION=0.1.0
+ARG RELEASE_VERSION=0.1.1
 
 USER root
 
@@ -44,7 +44,7 @@ ENV CORE88_RUNTIME_PREFIX=${CORE88_RUNTIME_PREFIX} \
 # BSD-3-Clause with an additional ML-training restriction. See
 # THIRD_PARTY_NOTICES.md; the Apache-2.0 label applies only to this repository's
 # added layer.
-LABEL org.opencontainers.image.source="https://github.com/LuckySJTU/ncp_olmo_eval" \
+LABEL org.opencontainers.image.source="https://github.com/LUMIA-Group/ncp_olmo_eval" \
       org.opencontainers.image.description="Pinned MultiPL-E scorer over the public v1 runtime" \
       org.opencontainers.image.base.name="${CORE88_UPSTREAM_REFERENCE}" \
       org.opencontainers.image.revision="${CORE88_SCORER_COMMIT}" \

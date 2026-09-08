@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncp-olmo-eval"
-version = "0.1.0"
+version = "0.1.1"
 description = "Reproducible vLLM evaluation for OLMo and NCP-ArchPreview"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,8 +30,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/LuckySJTU/ncp_olmo_eval"
-Issues = "https://github.com/LuckySJTU/ncp_olmo_eval/issues"
+Repository = "https://github.com/LUMIA-Group/ncp_olmo_eval"
+Issues = "https://github.com/LUMIA-Group/ncp_olmo_eval/issues"
 
 [project.optional-dependencies]
 vllm = [
