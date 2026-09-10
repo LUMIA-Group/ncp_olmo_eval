@@ -7,6 +7,8 @@ validation, and final result materialization for GSM8K, SciQ, Core88, RULER,
 and HELMET. Public pinned assets, OCI build recipes, and scheduler adapters let
 the same protocol run on a workstation, Slurm, Kubernetes, or another cluster.
 
+For inference scripts, see [vLLM](https://github.com/LuckySJTU/vllm/tree/dev/ncp-archpreview) and [lmdeploy](https://github.com/InternLM/lmdeploy).
+
 The distribution name `ncp-olmo-eval`, Python package `ncp_olmo_eval`, CLI
 commands, and `NCP_OLMO_*` environment variables are retained as stable
 compatibility identifiers. User-facing model-family terminology is
