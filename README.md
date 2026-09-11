@@ -24,6 +24,14 @@ mount, registry, proxy, account, credential, checkpoint, or scheduler default.
 > prepared-data identity, model identity, or source revision requires a new
 > evaluation.
 
+## Technical report
+
+**NCP-ArchPreview Technical Report: Moving towards Latent Space Language Models
+through Next Concept Prediction**
+
+- [arXiv:2609.10715](https://arxiv.org/abs/2609.10715)
+- [Hugging Face Papers](https://huggingface.co/papers/2609.10715)
+
 ## What is supported
 
 | Benchmark | Frozen inference contract | Inference plan | Final result |

@@ -32,6 +32,8 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/LUMIA-Group/ncp_olmo_eval"
 Issues = "https://github.com/LUMIA-Group/ncp_olmo_eval/issues"
+"Technical Report" = "https://arxiv.org/abs/2609.10715"
+"Hugging Face Papers" = "https://huggingface.co/papers/2609.10715"
 
 [project.optional-dependencies]
 vllm = [

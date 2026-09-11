@@ -33,6 +33,8 @@ def test_release_version_is_consistent_across_metadata() -> None:
     assert project["project"]["urls"] == {
         "Repository": "https://github.com/LUMIA-Group/ncp_olmo_eval",
         "Issues": "https://github.com/LUMIA-Group/ncp_olmo_eval/issues",
+        "Technical Report": "https://arxiv.org/abs/2609.10715",
+        "Hugging Face Papers": "https://huggingface.co/papers/2609.10715",
     }
     assert _fallback_version(root / "src/ncp_olmo_eval/__init__.py") == version
 
