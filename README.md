@@ -367,3 +367,20 @@ runtime has an additional machine-learning-training restriction. See
 [`NOTICE`](NOTICE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 The repository license does not license NCP-ArchPreview weights; each Hugging
 Face model card must declare its independently reviewed weight license.
+
+## Citation
+
+If you use this evaluation toolkit or the NCP-ArchPreview models, please cite
+the technical report:
+
+```bibtex
+@misc{ncpteam2026ncparchpreviewtechnicalreportmoving,
+  title={NCP-ArchPreview Technical Report: Moving towards Latent Space Language Models through Next Concept Prediction},
+  author={NCP Team and Jiaqi Cao and Chiyu Chen and Shuang Cheng and Xu Cheng and Beiya Dai and Yufan Feng and Kewen Ge and Ruijun Ge and Jiayi Huang and Yang Jiao and Dahua Lin and Zhouhan Lin and Yifan Liu and Yuliang Liu and Biqing Qi and Mowen Ruan and Junzhe Shen and Yunchong Song and Hao Sun and Zhongbo Tian and Yixuan Wang and Rubin Wei and Jiaxin Xiong and Kangyu Yang and Qian Yao and Qi Zhang and Bowen Zhou},
+  year={2026},
+  eprint={2609.10715},
+  archivePrefix={arXiv},
+  primaryClass={cs.CL},
+  url={https://arxiv.org/abs/2609.10715},
+}
+```
